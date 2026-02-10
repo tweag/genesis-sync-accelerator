@@ -324,7 +324,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks =
   -- This action pops the next entry from the queue, opens the corresponding chunk file,
   -- reads the block data, and extracts the requested component.
   let next =
-        atomically (readTVar varEntries) >>= \case
+        readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
           ((chunk, WithBlockSize size entry) : rest) -> do
             atomically $ writeTVar varEntries rest

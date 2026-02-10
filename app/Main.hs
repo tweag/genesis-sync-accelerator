@@ -5,7 +5,6 @@
 module Main (main) where
 
 import Cardano.Crypto.Init (cryptoInit)
-import Cardano.Node.Tracing (startResourceTracer)
 import qualified Cardano.Tools.DBAnalyser.Block.Cardano as Cardano
 import Cardano.Tools.DBAnalyser.HasAnalysis (mkProtocolInfo)
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
@@ -43,7 +42,6 @@ main = withStdTerminalHandles $ do
       remoteStorageTracer = showTracing stdoutTracer
   ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
-  startResourceTracer stdoutTracer rtsFrequency
   let remoteConfig = fmap (\url -> RemoteStorage.RemoteStorageConfig url remoteStorageCacheDir) remoteStorageSrcUrl
   absurd
     <$> Diffusion.run

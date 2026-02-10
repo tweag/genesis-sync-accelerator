@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- | HTTP client for downloading ImmutableDB chunks from a CDN.
 --
@@ -22,7 +23,6 @@ import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
-import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util (FileType (..), getFileName)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.FilePath ((</>))
 import "contra-tracer" Control.Tracer
@@ -48,6 +48,20 @@ data TraceRemoteStorageEvent
   deriving (Eq, Show)
 
 type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
+
+data FileType = ChunkFile | PrimaryIndexFile | SecondaryIndexFile | EpochFile
+  deriving (Eq, Show)
+
+getFileName :: FileType -> ChunkNo -> Text.Text
+getFileName fileType (ChunkNo chunk) = Text.justifyRight 5 '0' (Text.pack (show chunk)) <> "." <> toSuffix fileType
+
+toSuffix :: FileType -> Text.Text
+toSuffix = \case
+  ChunkFile -> "chunk"
+  PrimaryIndexFile -> "primary"
+  SecondaryIndexFile -> "secondary"
+  EpochFile -> "epoch"
+
 
 -- | Downloads all files associated with a specific chunk index.
 --
