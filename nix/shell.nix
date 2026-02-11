@@ -21,17 +21,7 @@ hsPkgs.shellFor {
     pkgs.xrefcheck
     pkgs.fourmolu
     pkgs.cuddle
-    # pkgs.cddlc
     pkgs.pretty-simple
-
-    # release management
-    pkgs.scriv
-    (pkgs.python3.withPackages (p: [
-      p.beautifulsoup4
-      p.html5lib
-      p.matplotlib
-      p.pandas
-    ]))
   ];
 
   # This is the place for tools that are required to be built with the same GHC
