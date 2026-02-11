@@ -1,7 +1,7 @@
 module GenesisSyncAccelerator.Parsers (parseAddr) where
 
-import GenesisSyncAccelerator.Types (HostAddr)
 import Data.Bifunctor (first)
+import GenesisSyncAccelerator.Types (HostAddr)
 import Text.Read (readMaybe)
 
 parseAddr :: String -> Either String HostAddr

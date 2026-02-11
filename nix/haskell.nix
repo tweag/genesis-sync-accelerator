@@ -19,14 +19,6 @@ let
   hsPkgs = haskell-nix.cabalProject {
     src = ./..;
     compiler-nix-name = "ghc967";
-    flake.variants = {
-      ghc910 = {
-        compiler-nix-name = lib.mkForce "ghc9102";
-      };
-      ghc912 = {
-        compiler-nix-name = lib.mkForce "ghc9122";
-      };
-    };
     inputMap = {
       "https://chap.intersectmbo.org/" = inputs.CHaP;
     };
@@ -39,6 +31,12 @@ let
       ))
     ];
     flake.variants = {
+      ghc910 = {
+        compiler-nix-name = lib.mkForce "ghc9102";
+      };
+      ghc912 = {
+        compiler-nix-name = lib.mkForce "ghc9122";
+      };
       profiled = {
         modules = [
           {

@@ -20,10 +20,7 @@ if ! command -v "$fdcmd" &> /dev/null; then
     fi
 fi
 
-case "$(uname -s)" in
-    MINGW*)     path="$(pwd -W | sed 's_/_\\\\_g')\\\\(ouroboros-consensus|sop-extras|strict-sop-core)";;
-    *)          path="$(pwd)/(ouroboros-consensus|sop-extras|strict-sop-core)";;
-esac
+path="$(pwd)"
 
 $fdcmd --full-path "$path" \
        --extension hs \
