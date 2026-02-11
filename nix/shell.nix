@@ -10,7 +10,6 @@ in
 hsPkgs.shellFor {
   nativeBuildInputs = [
     pkgs.cabal
-    pkgs.cabal-docspec
     pkgs.fd
     pkgs.nixfmt
     pkgs.dos2unix
