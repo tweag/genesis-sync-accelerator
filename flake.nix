@@ -94,7 +94,9 @@
         };
         inherit hydraJobs;
         legacyPackages = pkgs;
-        packages = hydraJobs.native.haskell96;
+        packages = hydraJobs.native.haskell96 // {
+          default = hydraJobs.native.haskell96.exes.genesis-sync-accelerator;
+        };
       }
     );
 }
