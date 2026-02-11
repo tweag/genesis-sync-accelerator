@@ -52,6 +52,4 @@ let
 in
 {
   inherit hsPkgs;
-
-
 }
