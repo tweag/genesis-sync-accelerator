@@ -21,7 +21,6 @@ module GenesisSyncAccelerator.OnDemand
   , OnDemandConfig (..)
   ) where
 
-import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
@@ -32,6 +31,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Debug.Trace (trace)
 import GHC.Generics (Generic)
+import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , CodecConfig
@@ -134,8 +134,8 @@ decorateImmutableDB cfg@OnDemandConfig{odcChunkInfo} db = do
       { getTip_ =
           -- Return a fake tip far in the future to allow streamAfterPoint to proceed.
           -- ChainSync uses the tip to decide whether to stream blocks.
-          let dummyHash = fromRawHash (Proxy @blk) (LBS.toStrict (LBS.replicate (fromIntegral (hashSize (Proxy @blk))) 0)) in
-          return . NotOrigin $ Tip maxBound IsNotEBB maxBound dummyHash
+          let dummyHash = fromRawHash (Proxy @blk) (LBS.toStrict (LBS.replicate (fromIntegral (hashSize (Proxy @blk))) 0))
+           in return . NotOrigin $ Tip maxBound IsNotEBB maxBound dummyHash
       , stream_ = \registry component from to -> do
           let requestedChunks = getChunksInRange odcChunkInfo from to
 

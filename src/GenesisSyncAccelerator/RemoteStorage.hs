@@ -1,6 +1,6 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
-{-# LANGUAGE LambdaCase #-}
 
 -- | HTTP client for downloading ImmutableDB chunks from a CDN.
 --
@@ -61,7 +61,6 @@ toSuffix = \case
   PrimaryIndexFile -> "primary"
   SecondaryIndexFile -> "secondary"
   EpochFile -> "epoch"
-
 
 -- | Downloads all files associated with a specific chunk index.
 --

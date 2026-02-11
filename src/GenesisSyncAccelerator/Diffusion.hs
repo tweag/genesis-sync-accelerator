@@ -6,6 +6,10 @@
 
 module GenesisSyncAccelerator.Diffusion (run) where
 
+import Control.ResourceRegistry
+import qualified Data.ByteString.Lazy as BL
+import Data.Functor.Contravariant ((>$<))
+import Data.Void (Void)
 import GenesisSyncAccelerator.MiniProtocols
   ( ChainSyncEventTracer
   , ChainSyncMessageTracer
@@ -13,10 +17,6 @@ import GenesisSyncAccelerator.MiniProtocols
   )
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
-import Control.ResourceRegistry
-import qualified Data.ByteString.Lazy as BL
-import Data.Functor.Contravariant ((>$<))
-import Data.Void (Void)
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
 import Ouroboros.Consensus.Block

@@ -12,7 +12,7 @@ hsPkgs.shellFor {
     pkgs.cabal
     pkgs.cabal-docspec
     pkgs.fd
-    pkgs.nixpkgs-fmt
+    pkgs.nixfmt
     pkgs.dos2unix
     pkgs.cabal-gild
     pkgs.hlint
