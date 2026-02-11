@@ -45,7 +45,6 @@ let
       }
       // lib.optionalAttrs (buildSystem == "x86_64-linux") {
         formattingLinting = import ./formatting-linting.nix pkgs;
-        inherit (pkgs) cabal-docspec-check consensus-pdfs agda-spec;
 
         # also test newer GHCs, but only on Linux to reduce CI load
         haskell910 = mkHaskellJobsFor pkgs.hsPkgs.projectVariants.ghc910;
@@ -62,7 +61,7 @@ let
   require =
     jobs:
     pkgs.releaseTools.aggregate {
-      name = "required-consensus";
+      name = "required-genesis-sync-accelerator";
       constituents = lib.collect lib.isDerivation jobs;
     };
 in

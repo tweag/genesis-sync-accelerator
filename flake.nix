@@ -27,22 +27,8 @@
       url = "github:input-output-hk/iohk-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    flake-compat = {
-      url = "github:nix-community/flake-compat";
-      flake = false;
-    };
     hls = {
       url = "github:haskell/haskell-language-server/2.11.0.0";
-      flake = false;
-    };
-    agda-nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    # for cabal-docspec
-    cabal-extras = {
-      url = "github:phadej/cabal-extras/cabal-docspec-0.0.0.20240703";
-      flake = false;
-    };
-    gentle-introduction = {
-      url = "github:phadej/gentle-introduction";
       flake = false;
     };
   };
@@ -82,8 +68,6 @@
           ghc910-profiled = hydraJobs.native.haskell910.devShellProfiled;
           ghc912 = hydraJobs.native.haskell912.devShell;
           ghc912-profiled = hydraJobs.native.haskell912.devShellProfiled;
-
-          agda-spec = pkgs.agda-spec.shell;
 
           website = pkgs.mkShell {
             packages = [

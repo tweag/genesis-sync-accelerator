@@ -18,13 +18,6 @@ in
 
   cabal = tool "cabal" "3.14.2.0" { };
 
-  cabal-docspec = tool "cabal-docspec" "git" {
-    src = inputs.cabal-extras;
-    cabalProject = ''
-      packages: peura cabal-docspec ${inputs.gentle-introduction} paths-0.2.0.0
-    '';
-  };
-
   cabal-hoogle = tool "cabal-hoogle" "git" {
     src = final.fetchFromGitHub {
       owner = "kokobd";

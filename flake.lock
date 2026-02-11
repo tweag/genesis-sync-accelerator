@@ -33,22 +33,6 @@
         "type": "github"
       }
     },
-    "agda-nixpkgs": {
-      "locked": {
-        "lastModified": 1726583932,
-        "narHash": "sha256-zACxiQx8knB3F8+Ze+1BpiYrI+CbhxyWpcSID9kVhkQ=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "658e7223191d2598641d50ee4e898126768fe847",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "blst": {
       "flake": false,
       "locked": {
@@ -117,23 +101,6 @@
         "type": "github"
       }
     },
-    "cabal-extras": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1719942255,
-        "narHash": "sha256-UbNZASD2xUk1S/z7yJ+k41kl523MZQW5t2wtPwemUhM=",
-        "owner": "phadej",
-        "repo": "cabal-extras",
-        "rev": "67a889582e7ef118f1c26b8f105abd2120f84fd0",
-        "type": "github"
-      },
-      "original": {
-        "owner": "phadej",
-        "ref": "cabal-docspec-0.0.0.20240703",
-        "repo": "cabal-extras",
-        "type": "github"
-      }
-    },
     "cardano-shell": {
       "flake": false,
       "locked": {
@@ -151,22 +118,6 @@
       }
     },
     "flake-compat": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1746162366,
-        "narHash": "sha256-5SSSZ/oQkwfcAz/o/6TlejlVGqeK08wyREBQ5qFFPhM=",
-        "owner": "nix-community",
-        "repo": "flake-compat",
-        "rev": "0f158086a2ecdbb138cd0429410e44994f1b7e4b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-community",
-        "repo": "flake-compat",
-        "type": "github"
-      }
-    },
-    "flake-compat_2": {
       "flake": false,
       "locked": {
         "lastModified": 1672831974,
@@ -198,22 +149,6 @@
       "original": {
         "owner": "numtide",
         "repo": "flake-utils",
-        "type": "github"
-      }
-    },
-    "gentle-introduction": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1719935136,
-        "narHash": "sha256-CJQHzxMyyw62tzkBMbymLMLQSyaGsYZ2mAeS30GPFAw=",
-        "owner": "phadej",
-        "repo": "gentle-introduction",
-        "rev": "407fe323ce0633afedabd92efdd968b8e22f3f1b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "phadej",
-        "repo": "gentle-introduction",
         "type": "github"
       }
     },
@@ -273,7 +208,7 @@
         "cabal-34": "cabal-34",
         "cabal-36": "cabal-36",
         "cardano-shell": "cardano-shell",
-        "flake-compat": "flake-compat_2",
+        "flake-compat": "flake-compat",
         "hackage": [
           "hackageNix"
         ],
@@ -765,11 +700,7 @@
     "root": {
       "inputs": {
         "CHaP": "CHaP",
-        "agda-nixpkgs": "agda-nixpkgs",
-        "cabal-extras": "cabal-extras",
-        "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
-        "gentle-introduction": "gentle-introduction",
         "hackageNix": "hackageNix",
         "haskellNix": "haskellNix",
         "hls": "hls_2",
