@@ -10,7 +10,6 @@
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
   , RemoteStorageConfig (..)
-  , TraceRemoteStorageEvent (..)
   , RemoteStorageTracer
   ) where
 
@@ -38,13 +37,13 @@ data RemoteStorageConfig = RemoteStorageConfig
 -- | Events traced by the Remote Storage client.
 data TraceRemoteStorageEvent
   = -- | Starting download of a file.
-    TraceRemoteStorageDownloadStart !String
+    TraceDownloadStart String
   | -- | Successfully downloaded a file.
-    TraceRemoteStorageDownloadSuccess !String !Word64
+    TraceDownloadSuccess String Word64
   | -- | Failed to download a file with an exception.
-    TraceRemoteStorageDownloadException !String !String
+    TraceDownloadException String String
   | -- | Failed to download a file with a non-200 HTTP status.
-    TraceRemoteStorageDownloadError !String !Int
+    TraceDownloadError String Int
   deriving (Eq, Show)
 
 type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
@@ -85,16 +84,16 @@ downloadFile tracer manager cfg chunk fileType = do
     request <- parseRequest (rscSrcUrl cfg ++ "/" ++ filename)
 
     -- Perform the download
-    traceWith tracer $ TraceRemoteStorageDownloadStart filename
+    traceWith tracer $ TraceDownloadStart filename
     result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
 
     case result of
-      Left ex -> traceWith tracer $ TraceRemoteStorageDownloadException filename (show ex)
+      Left ex -> traceWith tracer $ TraceDownloadException filename (show ex)
       Right response -> do
         let status = statusCode (responseStatus response)
         if status == 200
           then do
             let body = responseBody response
             LBS.writeFile localPath body
-            traceWith tracer $ TraceRemoteStorageDownloadSuccess filename (fromIntegral (LBS.length body))
-          else traceWith tracer $ TraceRemoteStorageDownloadError filename status
+            traceWith tracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
+          else traceWith tracer $ TraceDownloadError filename status
