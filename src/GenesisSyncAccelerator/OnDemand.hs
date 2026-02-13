@@ -274,6 +274,7 @@ getChunksInRange chunkInfo from to =
   where
     -- TODO: chunksBetween from ouroborous-consensus is incorrect, override locally to avoid this issue.
     -- Remove this function when the fix is merged upstream.
+    -- See: https://github.com/tweag/genesis-sync-accelerator/issues/7
     -- NOTE: We cannot deconstruct ChunkNo, so instead we must use the `nextChunkNo` function.
     chunksBetween :: ChunkNo -> ChunkNo -> [ChunkNo]
     chunksBetween a b = if a <= b then chunksBetween' a b else chunksBetween' b a
