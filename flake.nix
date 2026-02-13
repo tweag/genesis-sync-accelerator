@@ -68,13 +68,6 @@
           ghc910-profiled = hydraJobs.native.haskell910.devShellProfiled;
           ghc912 = hydraJobs.native.haskell912.devShell;
           ghc912-profiled = hydraJobs.native.haskell912.devShellProfiled;
-
-          website = pkgs.mkShell {
-            packages = [
-              pkgs.nodejs
-              pkgs.yarn
-            ];
-          };
         };
         inherit hydraJobs;
         legacyPackages = pkgs;
