@@ -42,10 +42,10 @@ main = withStdTerminalHandles $ do
       remoteStorageTracer = showTracing stdoutTracer
   ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
-  let remoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
+  let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
   absurd
     <$> Diffusion.run
-      remoteConfig
+      mbRemoteConfig
       maxCachedChunks
       msgTracer
       eventTracer
