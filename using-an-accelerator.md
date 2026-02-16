@@ -2,10 +2,10 @@
 
 ## Introduction and motivation
 If you're running a node which has never connected to the Cardano network, or has not connected in quite some time, it's time-consuming to get the node up-to-date with the current best chain. 
-To ease this burden, you can point your node to an instance of a Genesis Sync Accelerator, which you expect to serve you the block data more quickly (and more honestly) than a random peer on the network.
+To ease this burden, you can point your node to an instance of a Genesis Sync Accelerator, which you expect to serve you the block data more quickly (and more reliably) than a random peer on the network.
 
 In practice, you will run this data service locally, with the data coming from a trusted source from which reads are quick and cheap. 
-The data service running locally provides the ChainSync and BlockFetch mini-protocols in responder mode, so it will handle requests coming from you syncing node.
+The data service running locally provides the ChainSync and BlockFetch mini-protocols in responder mode, so it will handle requests coming from your syncing node.
 
 ## Configuration example
 
@@ -35,17 +35,17 @@ Once your local Accelerator instance is running, using it to power the sync of y
   "publicRoots": []
 }
 ```
-This indicates that the node should maintain one active ("hot") connection with the Accelerator; in practice, if there were additional access points, and you wanted more than just one active conncetion, you could adjust the `hotValency` value.
+This indicates that the node should maintain one active ("hot") connection with the Accelerator; in practice, if there were additional access points, and you wanted more than just one active connection, you could adjust the `hotValency` value.
 More important, this configuration says that the node should _not_ advertise the Accelerator as a peer to other nodes: in general, you'd like to not bog down your fast data service with additional request traffic.
 Furthermore, the above declaration adds a _necessary_ (for syncing in Genesis mode) pointer to a "peer snapshot file", which is a record of the "biggest" peers at a moment in time, according to their share of stake (in ADA). 
 These are peers with which your syncing node will communicate and which will, in general, be offering block headers during syncing which either refute or corroborate what's being advertised by your Accelerator instance.
 For a bit more, about the syncing via Genesis, refer to the [Genesis section](https://developers.cardano.org/docs/get-started/infrastructure/node/topology/#ouroboros-genesis) of the documentation about the topology file.
 
 ## Why it works
-When a node is syncing by using Genesis, at any given time only one active peer will be providing actual block data, while the others will just be corroborating (or refuting) what's proposed by the block-yielding peer, proposing their own version of the blockchain by advertising block headers.
-With an Accelerator among the `localRoots`, it's in the pool of peers with which your syncing node will strive to maintain some number (`hotvalency`) of active connections.
+When a node is syncing by using Genesis, at any given time only one active peer will be providing actual block data, while the others will be corroborating (or refuting) what's proposed by the block-yielding peer, proposing their own version of the blockchain by advertising block headers.
+With an Accelerator among the `localRoots`, it's in the pool of peers with which your syncing node will strive to maintain some number (`hotValency`) of active connections.
 Through a __round-robin process__ by which the syncing node cycles through active peers, the Accelerator will eventually become the one peer serving actual block data. 
-Since it's running locally, it will be able to serve data more quickly than other peers, and will "win out" as the peer most capable of saturating the syncing node's block processing capacity.
+Since it's running locally, it will likely be able to serve data more quickly than other peers, and will "win out" as the peer most capable of saturating the syncing node's block processing capacity.
 
 ## Worst-case scenario
 The _absolute_ worst-case scenario, of course, is _"eclipse"_, when adversarial nodes control more than 50% of stake. 
