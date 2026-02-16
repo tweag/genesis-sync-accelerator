@@ -18,14 +18,15 @@ module GenesisSyncAccelerator.MiniProtocols (ChainSyncMessageTracer, ChainSyncEv
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
 import Control.Monad (forever)
+import Control.Monad.IO.Class (MonadIO)
 import Control.ResourceRegistry
-import Data.Bifunctor (bimap)
+import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
-import Data.Typeable (Typeable)
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified Network.Mux as Mux
 import Ouroboros.Consensus.Block
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
@@ -43,9 +44,13 @@ import Ouroboros.Consensus.Node.Run (SerialiseNodeToNodeConstraints)
 import Ouroboros.Consensus.Storage.ChainDB.API (Follower (..))
 import qualified Ouroboros.Consensus.Storage.ChainDB.API as ChainDB
 import Ouroboros.Consensus.Storage.Common
-import Ouroboros.Consensus.Storage.ImmutableDB.API (ImmutableDB)
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.API as ImmutableDB
-import Ouroboros.Consensus.Storage.Serialisation (SerialisedHeader)
+import Ouroboros.Consensus.Storage.Serialisation
+  ( DecodeDisk
+  , DecodeDiskDep
+  , ReconstructNestedCtxt
+  , SerialisedHeader
+  )
 import Ouroboros.Consensus.Util
 import Ouroboros.Consensus.Util.IOLike
 import Ouroboros.Network.Block (ChainUpdate (..), Tip (..))
@@ -82,9 +87,13 @@ type ChainSyncEventTracer m blk =
   Tracer m (TraceChainSyncServerEvent blk)
 
 genesisSyncAccelerator ::
-  forall m blk addr.
+  forall m blk addr h.
   ( IOLike m
+  , MonadIO m
   , HasHeader blk
+  , DecodeDisk blk (ByteString -> blk)
+  , DecodeDiskDep (NestedCtxt Header) blk
+  , ReconstructNestedCtxt Header blk
   , ShowProxy blk
   , SerialiseNodeToNodeConstraints blk
   , SupportedNetworkProtocolVersion blk
@@ -94,13 +103,13 @@ genesisSyncAccelerator ::
   CodecConfig blk ->
   (NodeToNodeVersion -> addr -> CBOR.Encoding) ->
   (NodeToNodeVersion -> forall s. CBOR.Decoder s addr) ->
-  ImmutableDB m blk ->
+  OnDemand.OnDemandRuntime m blk h ->
   NetworkMagic ->
   Versions
     NodeToNodeVersion
     NodeToNodeVersionData
     (OuroborosApplicationWithMinimalCtx 'Mux.ResponderMode addr BL.ByteString m Void ())
-genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encAddr decAddr immDB networkMagic = do
+genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encAddr decAddr onDemand networkMagic = do
   forAllVersions application
  where
   forAllVersions ::
@@ -167,13 +176,13 @@ genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encA
           withRegistry $
             runPeer chainSyncMessageTracer cChainSyncCodecSerialised channel
               . chainSyncServerPeer
-              . chainSyncServer chainSyncEventTracer immDB ChainDB.getSerialisedHeaderWithPoint
+              . chainSyncServer chainSyncEventTracer onDemand ChainDB.getSerialisedHeaderWithPoint
       blockFetchProt =
         MiniProtocolCb $ \_ctx channel ->
           withRegistry $
             runPeer nullTracer cBlockFetchCodecSerialised channel
               . blockFetchServerPeer
-              . blockFetchServer immDB ChainDB.getSerialisedBlockWithPoint
+              . blockFetchServer onDemand ChainDB.getSerialisedBlockWithPoint
       txSubmissionProt =
         -- never reply, there is no timeout
         MiniProtocolCb $ \_ctx _channel -> sleepForever
@@ -196,14 +205,21 @@ data ChainSyncIntersection blk
   deriving anyclass NoThunks
 
 chainSyncServer ::
-  forall m blk a.
-  (IOLike m, HasHeader blk) =>
+  forall m blk a h.
+  ( IOLike m
+  , MonadIO m
+  , HasHeader blk
+  , DecodeDisk blk (ByteString -> blk)
+  , DecodeDiskDep (NestedCtxt Header) blk
+  , ReconstructNestedCtxt Header blk
+  , ConvertRawHash blk
+  ) =>
   Tracer m (TraceChainSyncServerEvent blk) ->
-  ImmutableDB m blk ->
+  OnDemand.OnDemandRuntime m blk h ->
   BlockComponent blk (ChainDB.WithPoint blk a) ->
   ResourceRegistry m ->
   ChainSyncServer a (Point blk) (Tip blk) m ()
-chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
+chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
   follower <- newImmutableDBFollower
   runChainSyncServer $
     chainSyncServerForFollower tr getImmutableTip follower
@@ -211,7 +227,11 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
   newImmutableDBFollower :: m (Follower m blk (ChainDB.WithPoint blk a))
   newImmutableDBFollower = do
     varIterator <-
-      newTVarIO =<< ImmutableDB.streamAll immDB registry blockComponent
+      newTVarIO
+        =<< OnDemand.onDemandIteratorFrom
+          onDemand
+          blockComponent
+          (StreamFromExclusive GenesisPoint)
     varIntersection <-
       newTVarIO $ JustNegotiatedIntersection GenesisPoint
     let getNextBlock = do
@@ -241,15 +261,13 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
         followerClose = ImmutableDB.iteratorClose =<< readTVarIO varIterator
 
         followerForward [] = pure Nothing
-        followerForward (pt : pts) =
-          ImmutableDB.streamAfterPoint immDB registry blockComponent pt >>= \case
-            Left _ -> followerForward pts
-            Right iterator -> do
-              followerClose
-              atomically $ do
-                writeTVar varIterator iterator
-                writeTVar varIntersection $ JustNegotiatedIntersection pt
-              pure $ Just pt
+        followerForward (pt : _pts) =
+          OnDemand.onDemandIteratorFrom onDemand blockComponent (StreamFromExclusive pt) >>= \iterator -> do
+            followerClose
+            atomically $ do
+              writeTVar varIterator iterator
+              writeTVar varIntersection $ JustNegotiatedIntersection pt
+            pure $ Just pt
 
     pure
       Follower
@@ -260,28 +278,32 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
         }
 
   getImmutableTip :: STM m (Tip blk)
-  getImmutableTip =
-    ImmutableDB.getTip immDB <&> \case
-      Origin -> TipGenesis
-      NotOrigin tip -> Tip tipSlotNo tipHash tipBlockNo
-       where
-        ImmutableDB.Tip tipSlotNo _ tipBlockNo tipHash = tip
+  getImmutableTip = do
+    OnDemand.readOnDemandTip onDemand >>= \case
+      Nothing -> pure TipGenesis
+      Just tip -> pure $ tipFromOnDemandTip tip
 
 blockFetchServer ::
-  forall m blk a.
-  (IOLike m, StandardHash blk, Typeable blk) =>
-  ImmutableDB m blk ->
+  forall m blk a h.
+  ( IOLike m
+  , MonadIO m
+  , HasHeader blk
+  , DecodeDisk blk (ByteString -> blk)
+  , DecodeDiskDep (NestedCtxt Header) blk
+  , ReconstructNestedCtxt Header blk
+  , ConvertRawHash blk
+  ) =>
+  OnDemand.OnDemandRuntime m blk h ->
   BlockComponent blk (ChainDB.WithPoint blk a) ->
   ResourceRegistry m ->
   BlockFetchServer a (Point blk) m ()
-blockFetchServer immDB blockComponent registry =
+blockFetchServer onDemand blockComponent _registry =
   blockFetchServer' nullTracer stream
  where
   stream from to =
-    bimap convertError convertIterator
-      <$> ImmutableDB.stream immDB registry blockComponent from to
+    Right . convertIterator
+      <$> OnDemand.onDemandIteratorForRange onDemand blockComponent from to
 
-  convertError = ChainDB.MissingBlock . ImmutableDB.missingBlockPoint
   convertIterator iterator =
     ChainDB.Iterator
       { ChainDB.iteratorNext =
@@ -299,3 +321,7 @@ data ImmDBServerException
   | TriedToFetchGenesis
   deriving stock Show
   deriving anyclass Exception
+
+tipFromOnDemandTip :: OnDemand.OnDemandTip blk -> Tip blk
+tipFromOnDemandTip tip =
+  Tip (OnDemand.odtSlot tip) (OnDemand.odtHash tip) (OnDemand.odtBlockNo tip)

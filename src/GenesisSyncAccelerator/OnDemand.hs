@@ -7,19 +7,25 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
 
--- | On-demand fetching wrapper for ImmutableDB.
+-- | On-demand fetching for ImmutableDB chunk files.
 --
--- This module provides a decorator for 'ImmutableDB' that intercepts streaming
--- requests. If the requested data is beyond the current indexed tip, it downloads
--- the missing chunks from a CDN and serves them using a local iterator that
--- reads directly from the downloaded chunk files.
+-- This module provides streaming helpers that download missing chunks from a CDN
+-- and serve them using local iterators that read directly from downloaded files.
 module GenesisSyncAccelerator.OnDemand
-  ( decorateImmutableDB
+  ( OnDemandConfig (..)
+  , OnDemandRuntime (..)
+  , OnDemandTip (..)
+  , OnDemandState
   , deleteChunkFiles
-  , OnDemandConfig (..)
+  , newOnDemandRuntime
+  , onDemandIteratorForRange
+  , onDemandIteratorFrom
+  , readOnDemandTip
   ) where
 
 import Control.Monad (forM, unless, void)
@@ -33,27 +39,27 @@ import qualified Data.Set as Set
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import Ouroboros.Consensus.Block
-  ( CodecConfig
+  ( BlockNo (..)
+  , CodecConfig
   , ConvertRawHash (..)
   , HasHeader
+  , HeaderHash
   , Header
   , HeaderHash
   , IsEBB (..)
   , NestedCtxt
-  , Point (BlockPoint, GenesisPoint)
+  
   , RealPoint (..)
+  , SlotNo (..)
+  , StandardHash
   , WithOrigin (..)
   , pointSlot
   , realPointSlot
   )
-import Ouroboros.Consensus.Block.RealPoint (realPointToPoint)
 import Ouroboros.Consensus.Storage.Common (BlockComponent, StreamFrom (..), StreamTo (..))
 import Ouroboros.Consensus.Storage.ImmutableDB.API
-  ( ImmutableDB (..)
-  , Iterator (..)
+  ( Iterator (..)
   , IteratorResult (..)
-  , Tip (..)
-  , getTipPoint
   )
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo, ChunkNo (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
@@ -72,6 +78,7 @@ import Ouroboros.Consensus.Util.IOLike
   ( IOLike
   , NoThunks
   , SomeException
+  , STM
   , StrictTVar
   , atomically
   , newTVarIO
@@ -82,7 +89,7 @@ import Ouroboros.Consensus.Util.IOLike
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
 import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
 
--- | Configuration for the On-Demand decorator.
+-- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
   { odcRemote :: Remote.RemoteStorageConfig
   -- ^ CDN connection details.
@@ -100,22 +107,49 @@ data OnDemandConfig m blk h = OnDemandConfig
   -- ^ Maximum number of chunks to keep in cache.
   }
 
+data OnDemandRuntime m blk h = OnDemandRuntime
+  { odrConfig :: OnDemandConfig m blk h
+  , odrState :: StrictTVar m (OnDemandState blk)
+  }
+
+newOnDemandRuntime ::
+  (IOLike m, MonadIO m, StandardHash blk, ConvertRawHash blk) =>
+  OnDemandConfig m blk h ->
+  m (OnDemandRuntime m blk h)
+newOnDemandRuntime cfg = do
+  stateVar <- newTVarIO (OnDemandState Set.empty [] Nothing)
+  mbTip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
+  case mbTip of
+    Nothing -> pure $ OnDemandRuntime cfg stateVar
+    Just tip -> do
+      let tipInfo = tipFromRemote tip
+      atomically $ writeTVar stateVar (OnDemandState Set.empty [] (Just tipInfo))
+      pure $ OnDemandRuntime cfg stateVar
+
 -- | Internal state tracking which chunks have been downloaded during the current session.
-data OnDemandState = OnDemandState
+data OnDemandState blk = OnDemandState
   { odsCachedChunks :: Set ChunkNo
   -- ^ Set of chunk indices already present on disk.
   , odsUsageOrder :: [ChunkNo]
   -- ^ Ordered list of chunks in cache, from Most Recently Used to Least Recently Used.
+  , odsTip :: Maybe (OnDemandTip blk)
+  -- ^ Tip from on-demand data or remote metadata.
   }
-  deriving (Generic, NoThunks)
+  deriving (Generic)
 
--- | Wraps an existing 'ImmutableDB' with on-demand fetching logic.
---
--- The resulting database will behave exactly like the original, except that
--- 'stream_' calls reaching beyond the current local tip will trigger HTTP
--- downloads of the required chunks.
-decorateImmutableDB ::
-  forall m blk h.
+data OnDemandTip blk = OnDemandTip
+  { odtSlot :: SlotNo
+  , odtHash :: HeaderHash blk
+  , odtBlockNo :: BlockNo
+  }
+  deriving (Generic)
+
+deriving instance NoThunks (HeaderHash blk) => NoThunks (OnDemandTip blk)
+
+deriving instance NoThunks (HeaderHash blk) => NoThunks (OnDemandState blk)
+
+onDemandIteratorForRange ::
+  forall m blk h b.
   ( IOLike m
   , MonadIO m
   , HasHeader blk
@@ -124,40 +158,33 @@ decorateImmutableDB ::
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
-  OnDemandConfig m blk h ->
-  ImmutableDB m blk ->
-  m (ImmutableDB m blk)
-decorateImmutableDB cfg@OnDemandConfig{odcChunkInfo} db = do
-  stateVar <- newTVarIO (OnDemandState Set.empty [])
-  pure $
-    db
-      { getTip_ =
-          -- Return a fake tip far in the future to allow streamAfterPoint to proceed.
-          -- ChainSync uses the tip to decide whether to stream blocks.
-          let dummyHash = fromRawHash (Proxy @blk) (LBS.toStrict (LBS.replicate (fromIntegral (hashSize (Proxy @blk))) 0))
-           in return . NotOrigin $ Tip maxBound IsNotEBB maxBound dummyHash
-      , stream_ = \registry component from to -> do
-          let requestedChunks = getChunksInRange odcChunkInfo from to
+  OnDemandRuntime m blk h ->
+  BlockComponent blk b ->
+  StreamFrom blk ->
+  StreamTo blk ->
+  m (Iterator m blk b)
+onDemandIteratorForRange OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from to =
+  mkOnDemandIterator cfg odrState component (getChunksInRange odcChunkInfo from to)
 
-          -- Check if ImmutableDB already has this range
-          tipPoint <- atomically $ getTipPoint db
+onDemandIteratorFrom ::
+  forall m blk h b.
+  ( IOLike m
+  , MonadIO m
+  , HasHeader blk
+  , DecodeDisk blk (ByteString -> blk)
+  , DecodeDiskDep (NestedCtxt Header) blk
+  , ReconstructNestedCtxt Header blk
+  , ConvertRawHash blk
+  ) =>
+  OnDemandRuntime m blk h ->
+  BlockComponent blk b ->
+  StreamFrom blk ->
+  m (Iterator m blk b)
+onDemandIteratorFrom OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from =
+  mkOnDemandIterator cfg odrState component (chunksFrom odcChunkInfo from)
 
-          let StreamToInclusive rp = to
-          let toPoint = realPointToPoint rp
-
-          -- Logic: If we are syncing beyond the current local tip, use Lazy On-Demand Iterator
-          if tipPoint >= toPoint
-            then stream_ db registry component from to
-            else
-              Right
-                <$> mkOnDemandIterator
-                  cfg
-                  stateVar
-                  component
-                  from
-                  to
-                  requestedChunks
-      }
+readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
+readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
 
 -- | Creates an iterator that downloads and serves chunks one by one.
 mkOnDemandIterator ::
@@ -171,13 +198,11 @@ mkOnDemandIterator ::
   , ConvertRawHash blk
   ) =>
   OnDemandConfig m blk h ->
-  StrictTVar m OnDemandState ->
+  StrictTVar m (OnDemandState blk) ->
   BlockComponent blk b ->
-  StreamFrom blk ->
-  StreamTo blk ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from to chunks = do
+mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component chunks = do
   varChunks <- newTVarIO chunks
   varCurrentIt <- newTVarIO Nothing
 
@@ -199,25 +224,19 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
             [] -> return IteratorExhausted
             (c : rest) -> do
               atomically $ writeTVar varChunks rest
-              -- Download only the current chunk before serving it.
-              -- A failed download (e.g. 404) means we've reached the end
-              -- of data available on the CDN.
-              ok <- ensureChunks cfg stateVar [c]
-              if not ok
-                then return IteratorExhausted
-                else do
-                  it <-
-                    mkRawChunkIterator
-                      odcHasFS
-                      odcChunkInfo
-                      odcCodecConfig
-                      odcCheckIntegrity
-                      component
-                      from
-                      to
-                      [c]
-                  atomically $ writeTVar varCurrentIt (Just it)
-                  next -- Transition to next chunk
+              -- Download only the current chunk before serving it
+              _ <- ensureChunks cfg stateVar [c]
+              it <-
+                mkRawChunkIterator
+                  odcHasFS
+                  odcChunkInfo
+                  odcCodecConfig
+                  odcCheckIntegrity
+                  component
+                  [c]
+                  stateVar
+              atomically $ writeTVar varCurrentIt (Just it)
+              next -- Transition to next chunk
     hasNext =
       readTVar varCurrentIt >>= \case
         Just it -> iteratorHasNext it
@@ -236,7 +255,7 @@ ensureChunks ::
   forall m blk h.
   (IOLike m, MonadIO m) =>
   OnDemandConfig m blk h ->
-  StrictTVar m OnDemandState ->
+  StrictTVar m (OnDemandState blk) ->
   [ChunkNo] ->
   m Bool
 ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} stateVar requestedChunks = do
@@ -262,7 +281,7 @@ ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} 
           (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
           updatedCached = Set.difference newCached (Set.fromList prune)
 
-        writeTVar stateVar (OnDemandState updatedCached stay)
+        writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = stay}
         return prune
 
       -- 3. Physically delete pruned chunks from disk
@@ -327,13 +346,10 @@ mkRawChunkIterator ::
   BlockComponent blk b ->
   -- | Stream lower bound: entries at or after this point are stremed.
   -- Note that inclusivity depends on the constructor being used (StreamFromInclusive vs StreamFromExclusive).
-  StreamFrom blk ->
-  -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
-  StreamTo blk ->
-  -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
+  StrictTVar m (OnDemandState blk) ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
+mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks stateVar = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
@@ -345,10 +361,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
     entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
     return $ map (chunk,) entries
 
-  let flatEntries =
-        applyStreamTo chunkInfo to
-          . applyStreamFrom chunkInfo from
-          $ concat allEntries
+  let flatEntries = concat allEntries
   varEntries <- newTVarIO flatEntries
 
   -- 2. Define the 'iteratorNext' action.
@@ -371,6 +384,9 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
                 hnd
                 (WithBlockSize size entry)
                 component
+            atomically $ do
+              curr <- readTVar stateVar
+              writeTVar stateVar curr{odsTip = Just (tipFromEntry chunkInfo entry)}
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
@@ -394,40 +410,20 @@ tipToRealPoint :: ChunkInfo -> Entry blk -> RealPoint blk
 tipToRealPoint ci Secondary.Entry{blockOrEBB, headerHash} =
   RealPoint (ChunkLayout.slotNoOfBlockOrEBB ci blockOrEBB) headerHash
 
--- | Filter entries to honour the 'StreamFrom' lower bound.
---
--- For 'StreamFromExclusive pt', drops entries at or before @pt@.
--- For 'StreamFromInclusive pt', drops entries strictly before @pt@.
--- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
--- so a simple 'dropWhile' from the front suffices.
-applyStreamFrom ::
-  Eq (HeaderHash blk) =>
-  ChunkInfo ->
-  StreamFrom blk ->
-  [(ChunkNo, WithBlockSize (Entry blk))] ->
-  [(ChunkNo, WithBlockSize (Entry blk))]
-applyStreamFrom ci = \case
-  StreamFromExclusive GenesisPoint -> id
-  StreamFromExclusive (BlockPoint fromSlot fromHash) ->
-    dropWhile $ \(_, WithBlockSize _ e) ->
-      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
-       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e == fromHash)
-  StreamFromInclusive (RealPoint fromSlot fromHash) ->
-    dropWhile $ \(_, WithBlockSize _ e) ->
-      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
-       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
+chunksFrom :: ChunkInfo -> StreamFrom blk -> [ChunkNo]
+chunksFrom ci from = iterate nextChunk (chunkForFrom ci from)
+ where
+  nextChunk (ChunkNo n) = ChunkNo (n + 1)
 
--- | Filter entries to honour the 'StreamTo' upper bound.
---
--- For 'StreamToInclusive pt', takes entries up to and including @pt@.
--- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
--- so a simple 'takeWhile' from the front suffices, with a final check for the
--- exact matching entry.
-applyStreamTo ::
-  ChunkInfo ->
-  StreamTo blk ->
-  [(ChunkNo, WithBlockSize (Entry blk))] ->
-  [(ChunkNo, WithBlockSize (Entry blk))]
-applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
-  takeWhile $ \(_, WithBlockSize _ e) ->
-    ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
+tipFromEntry :: ChunkInfo -> Entry blk -> OnDemandTip blk
+tipFromEntry ci entry =
+  let RealPoint slot hash = tipToRealPoint ci entry
+   in OnDemandTip slot hash (BlockNo (unSlotNo slot))
+
+tipFromRemote :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
+tipFromRemote tip =
+  OnDemandTip
+    { odtSlot = SlotNo (Remote.rtiSlot tip)
+    , odtHash = fromRawHash (Proxy @blk) (Remote.rtiHashBytes tip)
+    , odtBlockNo = BlockNo (Remote.rtiBlockNo tip)
+    }

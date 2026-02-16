@@ -26,8 +26,7 @@ main = withStdTerminalHandles $ do
   hSetBuffering stdout LineBuffering
   cryptoInit
   Opts
-    { immDBDir
-    , addr
+    { addr
     , port
     , configFile
     , rtsFrequency
@@ -54,7 +53,6 @@ main = withStdTerminalHandles $ do
       msgTracer
       eventTracer
       remoteStorageTracer
-      immDBDir
       sockAddr
       pInfoConfig
 
@@ -62,10 +60,7 @@ type RTSFrequency = Int
 
 -- | Command-line options for the Genesis Sync Accelerator.
 data Opts = Opts
-  { immDBDir :: FilePath
-  -- ^ Local path to the ImmutableDB directory.
-  -- TODO: Is this needed?
-  , addr :: HostAddr
+  { addr :: HostAddr
   -- ^ IP address to bind to.
   , port :: Socket.PortNumber
   -- ^ TCP port to listen on.
@@ -90,16 +85,9 @@ optsParser :: ParserInfo Opts
 optsParser =
   info (helper <*> parse) $ fullDesc <> progDesc desc
  where
-  desc = "Serve an ImmutableDB via ChainSync and BlockFetch"
+  desc = "Serve ImmutableDB chunks via ChainSync and BlockFetch"
 
   parse = do
-    immDBDir <-
-      strOption $
-        mconcat
-          [ long "db"
-          , help "Path to the ImmutableDB"
-          , metavar "PATH"
-          ]
     addr <-
       option (eitherReader parseAddr) $
         mconcat
@@ -134,8 +122,8 @@ optsParser =
     remoteStorageCacheDir <-
       strOption $
         mconcat
-          [ long "rs-cache-url"
-          , help "Path to possible cache dir for the Sync Accelerator"
+          [ long "cache-dir"
+          , help "Local cache directory for downloaded ImmutableDB chunks"
           , value "/tmp/sync-accelerator/"
           , metavar "PATH"
           , showDefault
@@ -159,8 +147,7 @@ optsParser =
           ]
     pure
       Opts
-        { immDBDir
-        , addr
+        { addr
         , port
         , configFile
         , rtsFrequency
