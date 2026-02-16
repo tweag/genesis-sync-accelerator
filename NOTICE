@@ -1,0 +1,31 @@
+Portions of this repository's Nix infrastructure are derived from IntersectMBO/ouroboros-consensus.
+See commit 8d9f76a3 in this repository for the initial import and modifications.
+
+Copied/derived files:
+- fourmolu.yaml
+- cabal.project
+- flake.lock
+- flake.nix
+- nix/ci.nix
+- nix/formatting-linting.nix
+- nix/haskell.nix
+- nix/shell.nix
+- nix/tools.nix
+- scripts/ci/check-cabal-files.sh
+- scripts/ci/run-cabal-gild.sh
+- scripts/ci/run-dos2unix.sh
+- scripts/ci/run-fourmolu.sh
+- scripts/ci/run-nixfmt.sh
+Copyright 2019-2023 Input Output Global Inc (IOG), INTERSECT 2023-2024.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
