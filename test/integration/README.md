@@ -1,11 +1,10 @@
 # Genesis Sync Accelerator: Integration Test
 
-## Prerequesites
+## Prerequisites
 
 Running this test requires a few tools to be in PATH including:
 
 - `cardano-node`
-- `db-analyser`
 - `python3`
 
 And of course `genesis-sync-accelerator`. The easiest way to get them is to enter
