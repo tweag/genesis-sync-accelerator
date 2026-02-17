@@ -29,19 +29,16 @@ import Data.List (delete)
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Debug.Trace (trace)
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import Ouroboros.Consensus.Block
-  ( BlockNo (..)
-  , CodecConfig
+  ( CodecConfig
   , ConvertRawHash (..)
   , HasHeader
   , Header
   , IsEBB (..)
   , NestedCtxt
   , RealPoint (..)
-  , SlotNo (..)
   , WithOrigin (..)
   , pointSlot
   , realPointSlot
