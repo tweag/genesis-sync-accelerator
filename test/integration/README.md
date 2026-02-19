@@ -50,10 +50,12 @@ The test:
 1. Ensures source ImmutableDB data exists (calls `chain-init.sh`)
 2. Starts a local HTTP CDN serving the source immutable chunks
 3. Starts the accelerator pointing at the CDN with an empty cache
-4. Starts a consumer `cardano-node` that syncs only from the accelerator
-5. Polls the accelerator's cache until all source chunks are downloaded (default timeout: 120s)
-6. Validates each cached chunk/primary/secondary file against the source via `sha256sum`
-7. Verifies the consumer's block count matches the source data using `db-analyser`
+4. Downloads the preprod peer snapshot for big ledger peer discovery
+5. Starts a consumer `cardano-node` that syncs from the accelerator and real preprod peers
+6. **Phase 1**: Waits for the consumer's ImmutableDB to accumulate enough chunk files
+7. **Phase 2**: Stops the consumer, verifies block count via `db-analyser`
+8. **Phase 3**: Validates accelerator participation — CDN downloads occurred, ChainSync messages served, blocks fetched from the accelerator via BlockFetch
+9. **Phase 4**: Validates cache integrity — checks that whatever chunk files ARE cached match the CDN source byte-for-byte via `sha256sum`
 
 ### Configuration
 
@@ -62,9 +64,10 @@ These configuration parameters can be overridden via environment variables.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DB_DIR` | `./test-data/source-db` | Path to the source chain database |
-| `SYNC_TIMEOUT` | `120` | Seconds to wait for the accelerator cache to fill |
-| `MIN_CHUNKS` | `10` | Number of chunk triplets to serve from CDN (subset of source) |
+| `CONSUMER_TIMEOUT` | `300` | Seconds to wait for the consumer's ImmutableDB to reach the target chunk count |
+| `MIN_CHUNKS` | `20` | Number of chunk triplets to serve from CDN (subset of source) |
 | `GSA` | `genesis-sync-accelerator` | Path to the accelerator binary (useful for testing a cabal-built binary) |
+| `CONSENSUS_MODE` | *(unset)* | Override consumer's ConsensusMode (e.g. `PraosMode` to bypass historicity check) |
 
 ### Network Ports
 
@@ -76,12 +79,36 @@ The test uses the following ports:
 | Accelerator | 13001 |
 | Consumer cardano-node | 13100 |
 
+### ConsensusMode
+
+The consumer runs in **GenesisMode** (`consumer-config.json`) while chain-init
+uses the default **PraosMode** (`config.json`). GenesisMode enables the Genesis
+State Machine (GSM), ChainSync Jumping (CSJ), and the Genesis Density
+Disconnector (GDD) — the features that the accelerator is designed to support.
+
+GenesisMode requires a **peer snapshot file** for initial peer discovery — bootstrap
+peers are a PraosMode mechanism (the official docs say "to revert to Praos mode,
+use bootstrap peers from the topology file"). The test downloads the official
+preprod `peer-snapshot.json` at runtime, which contains ~60 big ledger pool relay
+addresses. These provide enough peers to satisfy the Honest Availability
+Assumption (HAA) requirement of 5+ active big ledger peers.
+
+The consumer connects to both the local accelerator (trusted local root) and
+real preprod peers (discovered via the peer snapshot and ledger peer selection).
+This allows GenesisMode to validate the chain prefix served by the accelerator
+against the real network. GDD will eventually disconnect the accelerator once
+real peers push the Limit on Eagerness forward — that's expected and fine since
+the data has already been received.
+
+chain-init uses PraosMode to sync from preprod via bootstrap peers in its
+topology, since chain-init only needs to obtain raw chain data.
+
 ### PeerSharing
 
-`config.json` sets `"PeerSharing": false`. This is required for the consumer to
-enter `LocalRootsOnly` association mode, which makes the accelerator a trusted
-local root peer. Without this, the consumer's GSM stays in `PreSyncing` and
-BlockFetch never activates — the consumer never actually fetches blocks.
+The consumer topology sets `useLedgerAfterSlot` to enter `Unrestricted`
+association mode, allowing the consumer to discover additional peers via ledger
+peer selection and peer sharing. The node auto-configures `PeerSharing` based on
+forging status (since node 10.6.0).
 
 ### Cleanup
 
