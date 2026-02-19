@@ -19,4 +19,5 @@ packages: genesis-sync-accelerator.cabal
 tests: true
 
 constraints:
-  ouroboros-network >=0.22.1 && <0.22.6
+  , ouroboros-network >=0.22.1 && <0.22.6
+  , hashable <1.5

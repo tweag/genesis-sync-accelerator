@@ -33,16 +33,10 @@ let
 
   jobs = lib.filterAttrsRecursive (n: v: n != "recurseForDerivations") ({
     native = {
-      haskell96 = mkHaskellJobsFor pkgs.hsPkgs;
+      haskell = mkHaskellJobsFor pkgs.hsPkgs;
     } // lib.optionalAttrs (buildSystem == "x86_64-linux") {
       formattingLinting = import ./formatting-linting.nix pkgs;
-
-      # also test newer GHCs, but only on Linux to reduce CI load
-      haskell910 = mkHaskellJobsFor pkgs.hsPkgs.projectVariants.ghc910;
-      haskell912 = mkHaskellJobsFor pkgs.hsPkgs.projectVariants.ghc912;
     };
-  } // lib.optionalAttrs (buildSystem == "x86_64-linux") {
-    windows = { haskell96 = mkHaskellJobsFor pkgs.hsPkgs.projectCross.ucrt64; };
   });
 
   require = jobs:

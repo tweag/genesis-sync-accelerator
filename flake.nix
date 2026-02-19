@@ -54,18 +54,14 @@
         hydraJobs = import ./nix/ci.nix { inherit inputs pkgs; };
       in {
         devShells = rec {
-          default = ghc96;
-          ghc96 = hydraJobs.native.haskell96.devShell;
-          ghc96-profiled = hydraJobs.native.haskell96.devShellProfiled;
-          ghc910 = hydraJobs.native.haskell910.devShell;
-          ghc910-profiled = hydraJobs.native.haskell910.devShellProfiled;
-          ghc912 = hydraJobs.native.haskell912.devShell;
-          ghc912-profiled = hydraJobs.native.haskell912.devShellProfiled;
+          default = haskell;
+          haskell = hydraJobs.native.haskell.devShell;
+          haskell-profiled = hydraJobs.native.haskell.devShellProfiled;
         };
         inherit hydraJobs;
         legacyPackages = pkgs;
-        packages = hydraJobs.native.haskell96 // {
-          default = hydraJobs.native.haskell96.exes.genesis-sync-accelerator;
+        packages = hydraJobs.native.haskell // {
+          default = hydraJobs.native.haskell.exes.genesis-sync-accelerator;
         };
       });
 }
