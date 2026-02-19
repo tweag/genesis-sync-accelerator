@@ -1,3 +1,9 @@
+# Genesis Sync Accelerator
+## Documentation
+
+- [Using a Genesis Sync Accelerator](./using-an-accelerator.md)
+
+## License
 Copyright 2026 Modus Create, LLC.
 
 Licensed under the Apache License, Version 2.0 (the "License");
