@@ -39,13 +39,25 @@ instance Arbitrary FileType where
       , EpochFile
       ]
 
-buildProp_fsPath_FileType_is_correct :: FileType -> (ChunkNo -> FsPath) -> Property
-buildProp_fsPath_FileType_is_correct ft getFsPath =
+buildPropFsPathFileTypeIsCorrect :: FileType -> (ChunkNo -> FsPath) -> Property
+buildPropFsPathFileTypeIsCorrect ft getFsPath =
   forAll arbitrary $ \cn ->
     let fsPathChunks = fsPathToList (getFsPath cn)
         obs = traverse (parseDBFile . Text.unpack) fsPathChunks
         exp = Just [getParseDBFileExpectation ft cn]
      in obs === exp
+
+prop_fsPathChunkFileIsCorrect :: Property
+prop_fsPathChunkFileIsCorrect =
+  buildPropFsPathFileTypeIsCorrect ChunkFile fsPathChunkFile
+
+prop_fsPathPrimaryIndexFileIsCorrect :: Property
+prop_fsPathPrimaryIndexFileIsCorrect =
+  buildPropFsPathFileTypeIsCorrect PrimaryIndexFile fsPathPrimaryIndexFile
+
+prop_fsPathSecondaryIndexFileIsCorrect :: Property
+prop_fsPathSecondaryIndexFileIsCorrect =
+  buildPropFsPathFileTypeIsCorrect SecondaryIndexFile fsPathSecondaryIndexFile
 
 genSuffixAndValidityFlag :: Gen (Text.Text, Bool)
 genSuffixAndValidityFlag =
@@ -77,13 +89,13 @@ tests =
         prop_getFileName_is_compatible_with_parseDBFile_through_toSuffix
     , testProperty
         "fsPathChunkFile parses as ChunkFile"
-        (buildProp_fsPath_FileType_is_correct ChunkFile fsPathChunkFile)
+        prop_fsPathChunkFileIsCorrect
     , testProperty
         "fsPathPrimaryIndexFile parses as PrimaryIndexFile"
-        (buildProp_fsPath_FileType_is_correct PrimaryIndexFile fsPathPrimaryIndexFile)
+        prop_fsPathPrimaryIndexFileIsCorrect
     , testProperty
         "fsPathSecondaryIndexFile parses as SecondaryIndexFile"
-        (buildProp_fsPath_FileType_is_correct SecondaryIndexFile fsPathSecondaryIndexFile)
+        prop_fsPathSecondaryIndexFileIsCorrect
     , testProperty
         "getFileName then list is equivalent to renderFile then fsPathToList"
         prop_getFileName_then_list__is_equivalent_to__renderFile_then_fsPathToList
