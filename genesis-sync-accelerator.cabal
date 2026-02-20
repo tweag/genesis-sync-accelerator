@@ -59,3 +59,70 @@ executable genesis-sync-accelerator
     transformers,
     transformers-except,
     with-utf8,
+
+library
+  hs-source-dirs: src
+  exposed-modules:
+    GenesisSyncAccelerator.RemoteStorage
+
+  other-modules:
+    GenesisSyncAccelerator.Diffusion
+    GenesisSyncAccelerator.MiniProtocols
+    GenesisSyncAccelerator.OnDemand
+    GenesisSyncAccelerator.Parsers
+    GenesisSyncAccelerator.Tracing
+    GenesisSyncAccelerator.Types
+
+  build-depends:
+    base,
+    bytestring,
+    cardano-crypto-class,
+    cardano-strict-containers,
+    cborg,
+    containers,
+    contra-tracer,
+    directory,
+    filepath,
+    fs-api,
+    http-client,
+    http-client-tls,
+    http-types,
+    io-classes,
+    network,
+    network-mux,
+    optparse-applicative,
+    ouroboros-consensus,
+    ouroboros-consensus-cardano:unstable-cardano-tools,
+    ouroboros-consensus-diffusion,
+    ouroboros-network,
+    ouroboros-network-api,
+    ouroboros-network-framework,
+    ouroboros-network-protocols,
+    ouroboros-network-testing,
+    resource-registry,
+    stm,
+    text,
+    transformers,
+    transformers-except,
+
+test-suite all-tests
+  main-is: Main.hs
+  hs-source-dirs: test
+  type: exitcode-stdio-1.0
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    QuickCheck,
+    base,
+    fs-api,
+    genesis-sync-accelerator,
+    ouroboros-consensus,
+    quickcheck-instances,
+    tasty,
+    tasty-quickcheck,
+    text,
+
+  other-modules:
+    Test.GenesisSyncAccelerator.Storage

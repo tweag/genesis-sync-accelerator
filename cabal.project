@@ -14,3 +14,6 @@ index-state:
   , cardano-haskell-packages 2026-02-09T17:36:58Z
 
 packages: genesis-sync-accelerator.cabal
+
+-- Always build the test suites.
+tests: true

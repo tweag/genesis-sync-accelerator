@@ -9,8 +9,11 @@
 -- that constitute an ImmutableDB chunk from a remote HTTP server.
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
+  , FileType (..)
   , RemoteStorageConfig (..)
   , RemoteStorageTracer
+  , getFileName
+  , toSuffix
   ) where
 
 import Control.Exception (SomeException, try)
