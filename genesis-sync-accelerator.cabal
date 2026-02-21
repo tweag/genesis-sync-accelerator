@@ -83,7 +83,6 @@ library
   build-depends:
     base,
     bytestring,
-    cardano-crypto-class,
     cborg,
     containers,
     contra-tracer,
@@ -95,7 +94,6 @@ library
     http-types,
     network,
     network-mux,
-    optparse-applicative,
     ouroboros-consensus,
     ouroboros-consensus-diffusion,
     ouroboros-network,
