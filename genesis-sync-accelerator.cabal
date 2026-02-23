@@ -6,7 +6,20 @@ author: Modus Create, LLC.
 maintainer: erin.vanderveen@tweag.io
 build-type: Simple
 
+common common-all
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wpartial-fields
+    -Widentities
+    -Wredundant-constraints
+    -Wmissing-export-lists
+    -Wunused-packages
+
 executable genesis-sync-accelerator
+  import: common-all
   main-is: Main.hs
   hs-source-dirs:
     app
@@ -30,7 +43,6 @@ executable genesis-sync-accelerator
     base,
     bytestring,
     cardano-crypto-class,
-    cardano-strict-containers,
     cborg,
     containers,
     contra-tracer,
@@ -40,27 +52,22 @@ executable genesis-sync-accelerator
     http-client,
     http-client-tls,
     http-types,
-    io-classes,
     network,
     network-mux,
     optparse-applicative,
     ouroboros-consensus,
-    ouroboros-consensus-cardano,
     ouroboros-consensus-cardano:unstable-cardano-tools,
     ouroboros-consensus-diffusion,
     ouroboros-network,
     ouroboros-network-api,
     ouroboros-network-framework,
     ouroboros-network-protocols,
-    ouroboros-network-testing,
     resource-registry,
-    stm,
     text,
-    transformers,
-    transformers-except,
     with-utf8,
 
 library
+  import: common-all
   hs-source-dirs: src
   exposed-modules:
     GenesisSyncAccelerator.RemoteStorage
@@ -76,8 +83,6 @@ library
   build-depends:
     base,
     bytestring,
-    cardano-crypto-class,
-    cardano-strict-containers,
     cborg,
     containers,
     contra-tracer,
@@ -87,25 +92,19 @@ library
     http-client,
     http-client-tls,
     http-types,
-    io-classes,
     network,
     network-mux,
-    optparse-applicative,
     ouroboros-consensus,
-    ouroboros-consensus-cardano:unstable-cardano-tools,
     ouroboros-consensus-diffusion,
     ouroboros-network,
     ouroboros-network-api,
     ouroboros-network-framework,
     ouroboros-network-protocols,
-    ouroboros-network-testing,
     resource-registry,
-    stm,
     text,
-    transformers,
-    transformers-except,
 
 test-suite all-tests
+  import: common-all
   main-is: Main.hs
   hs-source-dirs: test
   type: exitcode-stdio-1.0
