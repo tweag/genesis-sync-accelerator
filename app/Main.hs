@@ -11,6 +11,7 @@ import Data.List (intercalate)
 import Data.Void
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
+import GenesisSyncAccelerator.Tracing (startResourceTracer)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Types (HostAddr)
 import Main.Utf8 (withStdTerminalHandles)
@@ -42,6 +43,7 @@ main = withStdTerminalHandles $ do
       remoteStorageTracer = showTracing stdoutTracer
   ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
+  startResourceTracer stdoutTracer rtsFrequency
   let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
   absurd
     <$> Diffusion.run
