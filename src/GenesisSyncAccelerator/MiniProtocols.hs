@@ -13,7 +13,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module GenesisSyncAccelerator.MiniProtocols (ChainSyncMessageTracer, ChainSyncEventTracer, genesisSyncAccelerator) where
+module GenesisSyncAccelerator.MiniProtocols (ChainSyncMessageTracer, ChainSyncEventTracer, BlockFetchTracer, genesisSyncAccelerator) where
 
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
@@ -29,7 +29,8 @@ import GHC.Generics (Generic)
 import qualified Network.Mux as Mux
 import Ouroboros.Consensus.Block
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
-  ( blockFetchServer'
+  ( TraceBlockFetchServerEvent
+  , blockFetchServer'
   )
 import Ouroboros.Consensus.MiniProtocol.ChainSync.Server
   ( TraceChainSyncServerEvent
@@ -81,6 +82,9 @@ type ChainSyncMessageTracer m blk =
 type ChainSyncEventTracer m blk =
   Tracer m (TraceChainSyncServerEvent blk)
 
+type BlockFetchTracer m blk =
+  Tracer m (TraceBlockFetchServerEvent blk)
+
 genesisSyncAccelerator ::
   forall m blk addr.
   ( IOLike m
@@ -91,6 +95,7 @@ genesisSyncAccelerator ::
   ) =>
   ChainSyncMessageTracer m blk ->
   ChainSyncEventTracer m blk ->
+  BlockFetchTracer m blk ->
   CodecConfig blk ->
   (NodeToNodeVersion -> addr -> CBOR.Encoding) ->
   (NodeToNodeVersion -> forall s. CBOR.Decoder s addr) ->
@@ -100,7 +105,7 @@ genesisSyncAccelerator ::
     NodeToNodeVersion
     NodeToNodeVersionData
     (OuroborosApplicationWithMinimalCtx 'Mux.ResponderMode addr BL.ByteString m Void ())
-genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encAddr decAddr immDB networkMagic = do
+genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer blockFetchTracer codecCfg encAddr decAddr immDB networkMagic = do
   forAllVersions application
  where
   forAllVersions ::
@@ -173,7 +178,7 @@ genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encA
           withRegistry $
             runPeer nullTracer cBlockFetchCodecSerialised channel
               . blockFetchServerPeer
-              . blockFetchServer immDB ChainDB.getSerialisedBlockWithPoint
+              . blockFetchServer blockFetchTracer immDB ChainDB.getSerialisedBlockWithPoint
       txSubmissionProt =
         -- never reply, there is no timeout
         MiniProtocolCb $ \_ctx _channel -> sleepForever
@@ -270,12 +275,13 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
 blockFetchServer ::
   forall m blk a.
   (IOLike m, StandardHash blk, Typeable blk) =>
+  BlockFetchTracer m blk ->
   ImmutableDB m blk ->
   BlockComponent blk (ChainDB.WithPoint blk a) ->
   ResourceRegistry m ->
   BlockFetchServer a (Point blk) m ()
-blockFetchServer immDB blockComponent registry =
-  blockFetchServer' nullTracer stream
+blockFetchServer tracer immDB blockComponent registry =
+  blockFetchServer' tracer stream
  where
   stream from to =
     bimap convertError convertIterator

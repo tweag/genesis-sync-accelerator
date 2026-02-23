@@ -42,6 +42,7 @@ main = withStdTerminalHandles $ do
       args = Cardano.CardanoBlockArgs configFile Nothing
       eventTracer = showTracing stdoutTracer
       msgTracer = showTracing stdoutTracer
+      blockFetchTracer = showTracing stdoutTracer
       remoteStorageTracer = showTracing stdoutTracer
   ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
@@ -53,6 +54,7 @@ main = withStdTerminalHandles $ do
       maxCachedChunks
       msgTracer
       eventTracer
+      blockFetchTracer
       remoteStorageTracer
       immDBDir
       sockAddr

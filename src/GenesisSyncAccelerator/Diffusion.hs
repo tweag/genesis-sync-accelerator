@@ -11,7 +11,8 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Functor.Contravariant ((>$<))
 import Data.Void (Void)
 import GenesisSyncAccelerator.MiniProtocols
-  ( ChainSyncEventTracer
+  ( BlockFetchTracer
+  , ChainSyncEventTracer
   , ChainSyncMessageTracer
   , genesisSyncAccelerator
   )
@@ -96,12 +97,13 @@ run ::
   Int ->
   ChainSyncMessageTracer IO blk ->
   ChainSyncEventTracer IO blk ->
+  BlockFetchTracer IO blk ->
   RemoteStorage.RemoteStorageTracer IO ->
   FilePath ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer remoteStorageTracer immDBDir sockAddr cfg = withRegistry \registry ->
+run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer blockFetchTracer remoteStorageTracer immDBDir sockAddr cfg = withRegistry \registry ->
   ImmutableDB.withDB
     (ImmutableDB.openDB (immDBArgs registry) runWithTempRegistry)
     \immDB -> do
@@ -123,6 +125,7 @@ run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer r
         genesisSyncAccelerator
           chainSyncMessageTracer
           chainSyncEventTracer
+          blockFetchTracer
           codecCfg
           encodeRemoteAddress
           decodeRemoteAddress
