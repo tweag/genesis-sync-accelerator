@@ -3,12 +3,17 @@ inputs: final: prev:
 let
   inherit (final) lib;
   tool-index-state = "2025-05-25T20:50:09Z";
-  tool = name: version: other:
-    final.haskell-nix.tool "ghc98" name ({
-      version = version;
-      index-state = tool-index-state;
-    } // other);
-in {
+  tool =
+    name: version: other:
+    final.haskell-nix.tool "ghc98" name (
+      {
+        version = version;
+        index-state = tool-index-state;
+      }
+      // other
+    );
+in
+{
   inherit tool-index-state;
 
   cabal = tool "cabal" "3.14.2.0" { };
@@ -43,7 +48,8 @@ in {
     inherit (final.hsPkgs.args) compiler-nix-name;
     index-state = tool-index-state;
   };
-  set-git-rev = drv:
+  set-git-rev =
+    drv:
     let
       patched-drv = final.applyPatches {
         name = "${drv.name}-with-git-rev";
@@ -53,5 +59,6 @@ in {
             ${lib.escapeShellArg inputs.self.rev} bin/*
         '';
       };
-    in if inputs.self ? rev then patched-drv else drv;
+    in
+    if inputs.self ? rev then patched-drv else drv;
 }

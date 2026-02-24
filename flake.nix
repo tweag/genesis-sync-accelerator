@@ -1,7 +1,9 @@
 {
   nixConfig = {
-    extra-substituters =
-      [ "https://cache.iog.io" "https://genesis-sync-accelerator.cachix.org" ];
+    extra-substituters = [
+      "https://cache.iog.io"
+      "https://genesis-sync-accelerator.cachix.org"
+    ];
     extra-trusted-public-keys = [
       "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ="
       "genesis-sync-accelerator.cachix.org-1:/usH0+ZtxuHMWbx5teUFACvRZV1+LdBtjwoYruy4OGY="
@@ -32,7 +34,8 @@
       flake = false;
     };
   };
-  outputs = inputs:
+  outputs =
+    inputs:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -40,7 +43,9 @@
         #"aarch64-linux"
         "aarch64-darwin"
       ];
-    in inputs.flake-utils.lib.eachSystem supportedSystems (system:
+    in
+    inputs.flake-utils.lib.eachSystem supportedSystems (
+      system:
       let
         pkgs = import inputs.nixpkgs {
           inherit system;
@@ -55,7 +60,8 @@
           ];
         };
         hydraJobs = import ./nix/ci.nix { inherit inputs pkgs; };
-      in {
+      in
+      {
         devShells = rec {
           default = haskell;
           haskell = hydraJobs.native.haskell.devShell;
@@ -78,5 +84,6 @@
         packages = hydraJobs.native.haskell // {
           default = hydraJobs.native.haskell.exes.genesis-sync-accelerator;
         };
-      });
+      }
+    );
 }
