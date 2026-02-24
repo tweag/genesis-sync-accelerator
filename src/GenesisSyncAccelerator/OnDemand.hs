@@ -321,9 +321,10 @@ mkRawChunkIterator ::
   (blk -> Bool) ->
   -- | The component of the block to stream (e.g., the whole block, just the header, etc.).
   BlockComponent blk b ->
-  -- | Stream lower bound: entries at or before this point are excluded.
+  -- | Stream lower bound: entries at or after this point are stremed.
+  -- Note that inclusivity depends on the constructor being used (StreamFromInclusive vs StreamFromExclusive).
   StreamFrom blk ->
-  -- | Stream upper bound: entries after this point are excluded.
+  -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
   StreamTo blk ->
   -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
