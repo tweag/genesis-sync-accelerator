@@ -156,6 +156,7 @@ stdbuf -oL $GSA \
   --rs-cache-url "$ACCEL_CACHE" \
   --port "$ACCEL_PORT" \
   --max-cached-chunks "$MAX_CACHED_CHUNKS" \
+  +RTS -T -RTS \
   >"$TMPDIR/accelerator.log" 2>&1 &
 ACCEL_PID=$!
 PIDS+=($ACCEL_PID)
