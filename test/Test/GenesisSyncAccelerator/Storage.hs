@@ -1,8 +1,7 @@
-{-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Test.GenesisSyncAccelerator.Storage (tests) where
 
-import Data.Maybe (isJust, isNothing)
 import qualified Data.Text as Text
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), getFileName, toSuffix)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
@@ -43,9 +42,9 @@ buildPropFsPathFileTypeIsCorrect :: FileType -> (ChunkNo -> FsPath) -> Property
 buildPropFsPathFileTypeIsCorrect ft getFsPath =
   forAll arbitrary $ \cn ->
     let fsPathChunks = fsPathToList (getFsPath cn)
-        obs = traverse (parseDBFile . Text.unpack) fsPathChunks
-        exp = Just [getParseDBFileExpectation ft cn]
-     in obs === exp
+        observed = traverse (parseDBFile . Text.unpack) fsPathChunks
+        expected = Just [getParseDBFileExpectation ft cn]
+     in observed === expected
 
 prop_fsPathChunkFileIsCorrect :: Property
 prop_fsPathChunkFileIsCorrect =
@@ -58,14 +57,6 @@ prop_fsPathPrimaryIndexFileIsCorrect =
 prop_fsPathSecondaryIndexFileIsCorrect :: Property
 prop_fsPathSecondaryIndexFileIsCorrect =
   buildPropFsPathFileTypeIsCorrect SecondaryIndexFile fsPathSecondaryIndexFile
-
-genSuffixAndValidityFlag :: Gen (Text.Text, Bool)
-genSuffixAndValidityFlag =
-  let validSuffixes = map toSuffix [ChunkFile, PrimaryIndexFile, SecondaryIndexFile, EpochFile]
-   in frequency
-        [ (3, (,True) <$> elements validSuffixes)
-        , (7, (,False) <$> arbitrary `suchThat` (`notElem` validSuffixes))
-        ]
 
 getParseDBFileExpectation :: FileType -> ChunkNo -> (String, ChunkNo)
 getParseDBFileExpectation ft cn = (Text.unpack $ toSuffix ft, cn)

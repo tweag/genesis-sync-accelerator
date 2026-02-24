@@ -1,6 +1,9 @@
 Portions of this repository's Nix infrastructure are derived from IntersectMBO/ouroboros-consensus.
 See commit 8d9f76a3 in this repository for the initial import and modifications.
 
+The tracing of resource stats is derived from IntersectMBO/cardano-node.
+See commit 7f913454 in this repository for the initial import and modifications.
+
 Copied/derived files:
 - fourmolu.yaml
 - cabal.project
@@ -16,6 +19,7 @@ Copied/derived files:
 - scripts/ci/run-dos2unix.sh
 - scripts/ci/run-fourmolu.sh
 - scripts/ci/run-nixfmt.sh
+- src/GenesisSyncAccelerator/Tracing/Resources.hs
 Copyright 2019-2023 Input Output Global Inc (IOG), INTERSECT 2023-2024.
 
    Licensed under the Apache License, Version 2.0 (the "License");

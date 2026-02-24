@@ -40,6 +40,7 @@ executable genesis-sync-accelerator
     GenesisSyncAccelerator.Types
 
   build-depends:
+    async,
     base,
     bytestring,
     cardano-crypto-class,
@@ -52,6 +53,7 @@ executable genesis-sync-accelerator
     http-client,
     http-client-tls,
     http-types,
+    io-classes,
     network,
     network-mux,
     optparse-applicative,
@@ -64,6 +66,8 @@ executable genesis-sync-accelerator
     ouroboros-network-protocols,
     resource-registry,
     text,
+    trace-dispatcher,
+    trace-resources,
     with-utf8,
 
 library
@@ -77,7 +81,6 @@ library
     GenesisSyncAccelerator.MiniProtocols
     GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.Parsers
-    GenesisSyncAccelerator.Tracing
     GenesisSyncAccelerator.Types
 
   build-depends:
