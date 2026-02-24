@@ -5,7 +5,7 @@ in hsPkgs.shellFor {
   nativeBuildInputs = [
     pkgs.cabal
     pkgs.fd
-    pkgs.nixfmt
+    pkgs.nixfmt-classic
     pkgs.dos2unix
     pkgs.cabal-gild
     pkgs.hlint

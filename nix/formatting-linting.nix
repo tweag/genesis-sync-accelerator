@@ -27,7 +27,7 @@ let
     fourmolu = checkFormatting pkgs.fourmolu ../scripts/ci/run-fourmolu.sh;
     cabal-gild =
       checkFormatting pkgs.cabal-gild ../scripts/ci/run-cabal-gild.sh;
-    nixfmt = checkFormatting pkgs.nixfmt ../scripts/ci/run-nixfmt.sh;
+    nixfmt = checkFormatting pkgs.nixfmt-classic ../scripts/ci/run-nixfmt.sh;
     dos2unix = checkFormatting pkgs.dos2unix ../scripts/ci/run-dos2unix.sh;
     hlint = pkgs.runCommand "hlint" {
       buildInputs = [ pkgs.hlint ];
