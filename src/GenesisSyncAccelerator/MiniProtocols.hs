@@ -176,7 +176,7 @@ genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encA
               . blockFetchServer immDB ChainDB.getSerialisedBlockWithPoint
       txSubmissionProt =
         -- never reply, there is no timeout
-        MiniProtocolCb $ \_ctx _channel -> forever $ threadDelay 10
+        MiniProtocolCb $ \_ctx _channel -> sleepForever
 
     mkMiniProtocol miniProtocolStart miniProtocolNum limits proto =
       MiniProtocol
@@ -227,7 +227,7 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
                 writeTVar varIntersection AlreadySentRollbackToIntersection
               pure $ RollBack intersectionPt
             AlreadySentRollbackToIntersection ->
-              getNextBlock >>= maybe (forever $ threadDelay 10) (pure . AddBlock)
+              getNextBlock >>= maybe sleepForever (pure . AddBlock)
 
         followerInstructionNonBlocking =
           readTVarIO varIntersection >>= \case
@@ -290,6 +290,9 @@ blockFetchServer immDB blockComponent registry =
             ImmutableDB.IteratorExhausted -> ChainDB.IteratorExhausted
       , ChainDB.iteratorClose = ImmutableDB.iteratorClose iterator
       }
+
+sleepForever :: IOLike m => m a
+sleepForever = forever $ threadDelay 10
 
 data ImmDBServerException
   = ReachedImmutableTip
