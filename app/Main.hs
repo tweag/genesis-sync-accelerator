@@ -15,10 +15,10 @@ import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (startResourceTracer)
 import GenesisSyncAccelerator.Types (HostAddr)
 import Main.Utf8 (withStdTerminalHandles)
-import System.IO (BufferMode (..), hSetBuffering, stdout)
 import qualified Network.Socket as Socket
 import Options.Applicative
 import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
+import System.IO (BufferMode (..), hSetBuffering, stdout)
 import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
 main :: IO ()

@@ -53,7 +53,7 @@ type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
 
 -- | Exception thrown when a file download fails (HTTP error or non-200 status).
 newtype DownloadFailed = DownloadFailed String
-  deriving (Show)
+  deriving Show
 
 instance Exception DownloadFailed
 

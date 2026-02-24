@@ -243,8 +243,10 @@ ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} 
   state <- readTVarIO stateVar
   let missingChunks = filter (\c -> not (Set.member c (odsCachedChunks state))) requestedChunks
 
-  downloadResult <- liftIO $ try @_ @Remote.DownloadFailed $
-    mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
+  downloadResult <-
+    liftIO $
+      try @_ @Remote.DownloadFailed $
+        mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
 
   case downloadResult of
     Left _ex -> return False
