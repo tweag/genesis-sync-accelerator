@@ -241,7 +241,7 @@ ensureChunks ::
 ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} stateVar requestedChunks = do
   -- 1. Identify and download missing chunks
   state <- readTVarIO stateVar
-  let missingChunks = filter (\c -> not (Set.member c (odsCachedChunks state))) requestedChunks
+  let missingChunks = filter (`Set.notMember` odsCachedChunks state) requestedChunks
 
   downloadResult <-
     liftIO $
