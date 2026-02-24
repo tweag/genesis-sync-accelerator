@@ -227,9 +227,7 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
                 writeTVar varIntersection AlreadySentRollbackToIntersection
               pure $ RollBack intersectionPt
             AlreadySentRollbackToIntersection ->
-              getNextBlock >>= \case
-                Just a -> pure $ AddBlock a
-                Nothing -> forever $ threadDelay 86400
+              getNextBlock >>= maybe (forever $ threadDelay maxBound) (pure . AddBlock)
 
         followerInstructionNonBlocking =
           readTVarIO varIntersection >>= \case
