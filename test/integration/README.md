@@ -48,7 +48,7 @@ These configuration parameters can be overridden via environment variables.
 |----------|---------|-------------|
 | `DB_DIR` | `./test-data/source-db` | Path to the source chain database |
 | `CONSUMER_TIMEOUT` | `300` | Seconds to wait for the consumer's ImmutableDB to reach the target chunk count |
-| `MIN_CHUNKS` | `20` | Number of chunk triplets to serve from CDN (subset of source) |
+| `MIN_CHUNKS` | `20` | Number of chunks (three files each) to serve from CDN (subset of source) |
 | `GSA` | `genesis-sync-accelerator` | Path to the accelerator binary (useful for testing a cabal-built binary) |
 | `CONSENSUS_MODE` | *(unset)* | Override consumer's ConsensusMode (e.g. `PraosMode` to bypass historicity check) |
 | `CDN_PORT` | `3000` | Port for the local HTTP CDN |
