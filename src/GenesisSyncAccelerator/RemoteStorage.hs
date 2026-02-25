@@ -23,19 +23,16 @@ module GenesisSyncAccelerator.RemoteStorage
 import Control.Exception (SomeException, try)
 import Data.Aeson (FromJSON (..), eitherDecode, withObject, (.:))
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
-<<<<<<< HEAD
 import GenesisSyncAccelerator.Tracing
   ( RemoteStorageTracer
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-=======
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word64)
-import qualified Data.ByteString.Base16 as Base16
->>>>>>> 80c6523 (feat!: drop full dependency on immdb)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
@@ -52,30 +49,6 @@ data RemoteStorageConfig = RemoteStorageConfig
   -- ^ Local directory where the downloaded chunks should be stored.
   }
 
-<<<<<<< HEAD
-=======
--- | Events traced by the Remote Storage client.
-data TraceRemoteStorageEvent
-  = -- | Starting download of a file.
-    TraceDownloadStart String
-  | -- | Successfully downloaded a file.
-    TraceDownloadSuccess String Word64
-  | -- | Failed to download a file.
-    TraceDownloadFailure TraceDownloadFailure
-  deriving (Eq, Show)
-
--- | Download failure reasons.
-data TraceDownloadFailure
-  = -- | Exception during download.
-    TraceDownloadException String String
-  | -- | Non-200 HTTP status.
-    TraceDownloadError String Int
-  | -- | Starting download of tip metadata.
-    TraceTipFetchStart !String
-  deriving (Eq, Show)
-
-type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
-
 data RemoteTipInfo = RemoteTipInfo
   { rtiSlot :: Word64
   , rtiBlockNo :: Word64
@@ -83,7 +56,6 @@ data RemoteTipInfo = RemoteTipInfo
   }
   deriving (Eq, Show)
 
->>>>>>> 80c6523 (feat!: drop full dependency on immdb)
 data FileType = ChunkFile | PrimaryIndexFile | SecondaryIndexFile | EpochFile
   deriving (Eq, Show)
 
@@ -160,24 +132,23 @@ fetchTipInfo tracer cfg = do
         then do
           traceWith tracer . TraceDownloadFailure $ TraceDownloadError tipUrl status
           pure Nothing
-        else
-          case eitherDecode (responseBody response) of
-            Left err -> do
-              traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl err
-              pure Nothing
-            Right tipJson ->
-              case decodeTipHash (rtHash tipJson) of
-                Left err -> do
-                  traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl err
-                  pure Nothing
-                Right hashBytes ->
-                  pure $
-                    Just
-                      RemoteTipInfo
-                        { rtiSlot = rtSlot tipJson
-                        , rtiBlockNo = rtBlockNo tipJson
-                        , rtiHashBytes = hashBytes
-                        }
+        else case eitherDecode (responseBody response) of
+          Left err -> do
+            traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl err
+            pure Nothing
+          Right tipJson ->
+            case decodeTipHash (rtHash tipJson) of
+              Left err -> do
+                traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl err
+                pure Nothing
+              Right hashBytes ->
+                pure $
+                  Just
+                    RemoteTipInfo
+                      { rtiSlot = rtSlot tipJson
+                      , rtiBlockNo = rtBlockNo tipJson
+                      , rtiHashBytes = hashBytes
+                      }
 
 data RemoteTipJson = RemoteTipJson
   { rtSlot :: Word64

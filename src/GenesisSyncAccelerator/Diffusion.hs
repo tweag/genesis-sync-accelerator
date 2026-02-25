@@ -123,6 +123,6 @@ run mbRemoteConfig maxCachedChunks tracers sockAddr cfg =
   networkMagic = getNetworkMagic . configBlock $ cfg
 
 data DiffusionConfigError = MissingRemoteConfig
-  deriving (Show)
+  deriving Show
 
 instance Exception DiffusionConfigError
