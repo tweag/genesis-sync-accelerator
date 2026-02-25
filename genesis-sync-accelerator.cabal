@@ -136,6 +136,7 @@ test-suite storage-tests
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
+    quickcheck-instances,
     tasty,
     tasty-quickcheck,
     temporary,
