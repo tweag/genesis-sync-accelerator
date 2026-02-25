@@ -243,14 +243,11 @@ ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} 
   state <- readTVarIO stateVar
   let missingChunks = filter (`Set.notMember` odsCachedChunks state) requestedChunks
 
-  downloadResult <-
-    liftIO $
-      try @_ @Remote.DownloadFailed $
-        mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
+  downloadResult <- liftIO $ mapM (Remote.downloadChunk odcTracer odcRemote) missingChunks
 
-  case downloadResult of
-    Left _ex -> return False
-    Right () -> do
+  case sequence_ downloadResult of
+    Left _ -> return False
+    Right _ -> do
       -- 2. Update usage order and identify chunks to prune
       toPrune <- atomically $ do
         curr <- readTVar stateVar

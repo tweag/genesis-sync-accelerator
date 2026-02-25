@@ -9,7 +9,6 @@
 -- that constitute an ImmutableDB chunk from a remote HTTP server.
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
-  , DownloadFailed (..)
   , FileType (..)
   , RemoteStorageConfig (..)
   , RemoteStorageTracer
@@ -17,7 +16,7 @@ module GenesisSyncAccelerator.RemoteStorage
   , toSuffix
   ) where
 
-import Control.Exception (Exception, SomeException, throwIO, try)
+import Control.Exception (SomeException, try)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
 import Data.Word (Word64)
@@ -43,19 +42,19 @@ data TraceRemoteStorageEvent
     TraceDownloadStart String
   | -- | Successfully downloaded a file.
     TraceDownloadSuccess String Word64
-  | -- | Failed to download a file with an exception.
+  | -- | Failed to download a file.
+    TraceDownloadFailure TraceDownloadFailure
+  deriving (Eq, Show)
+
+-- | Download failure reasons.
+data TraceDownloadFailure
+  = -- | Exception during download.
     TraceDownloadException String String
-  | -- | Failed to download a file with a non-200 HTTP status.
+  | -- | Non-200 HTTP status.
     TraceDownloadError String Int
   deriving (Eq, Show)
 
 type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
-
--- | Exception thrown when a file download fails (HTTP error or non-200 status).
-newtype DownloadFailed = DownloadFailed String
-  deriving Show
-
-instance Exception DownloadFailed
 
 data FileType = ChunkFile | PrimaryIndexFile | SecondaryIndexFile | EpochFile
   deriving (Eq, Show)
@@ -73,37 +72,45 @@ toSuffix = \case
 -- | Downloads all files associated with a specific chunk index.
 --
 -- This function fetches the @.chunk@, @.primary@, and @.secondary@ files.
-downloadChunk :: RemoteStorageTracer IO -> RemoteStorageConfig -> ChunkNo -> IO ()
+downloadChunk ::
+  RemoteStorageTracer IO ->
+  RemoteStorageConfig ->
+  ChunkNo ->
+  IO (Either TraceDownloadFailure [FilePath])
 downloadChunk tracer cfg chunk = do
   manager <- newManager tlsManagerSettings
   createDirectoryIfMissing True (rscDstDir cfg)
   let fileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
-  mapM_ (downloadFile tracer manager cfg chunk) fileTypes
+  sequence <$> mapM (downloadFile tracer manager cfg chunk) fileTypes
 
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
-  RemoteStorageTracer IO -> Manager -> RemoteStorageConfig -> ChunkNo -> FileType -> IO ()
-downloadFile tracer manager cfg chunk fileType = do
+  RemoteStorageTracer IO ->
+  Manager ->
+  RemoteStorageConfig ->
+  ChunkNo ->
+  FileType ->
+  IO (Either TraceDownloadFailure FilePath)
+downloadFile eventTracer manager cfg chunk fileType = do
   let filename = Text.unpack $ getFileName fileType chunk
       localPath = rscDstDir cfg </> filename
+      failureTracer = contramap TraceDownloadFailure eventTracer
+      processResponse r =
+        case statusCode (responseStatus r) of
+          200 -> do
+            let body = responseBody r
+            LBS.writeFile localPath body
+            traceWith eventTracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
+            pure $ Right localPath
+          status ->
+            let e = TraceDownloadError filename status
+             in traceWith failureTracer e >> pure (Left e)
+      traceEx :: SomeException -> IO (Either TraceDownloadFailure FilePath)
+      traceEx ex =
+        let e = TraceDownloadException filename $ show ex
+         in traceWith failureTracer e >> pure (Left e)
   -- Construct request
   request <- parseRequest (rscSrcUrl cfg ++ "/" ++ filename)
-
   -- Perform the download
-  traceWith tracer $ TraceDownloadStart filename
-  result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
-
-  case result of
-    Left ex -> do
-      traceWith tracer $ TraceDownloadException filename (show ex)
-      throwIO $ DownloadFailed filename
-    Right response -> do
-      let status = statusCode (responseStatus response)
-      if status == 200
-        then do
-          let body = responseBody response
-          LBS.writeFile localPath body
-          traceWith tracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
-        else do
-          traceWith tracer $ TraceDownloadError filename status
-          throwIO $ DownloadFailed filename
+  traceWith eventTracer $ TraceDownloadStart filename
+  try (httpLbs request manager) >>= either traceEx processResponse
