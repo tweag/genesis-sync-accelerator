@@ -25,6 +25,7 @@ ACCEL_PORT="${ACCEL_PORT:-3002}"
 CONSUMER_PORT="${CONSUMER_PORT:-3001}"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 MAX_CACHED_CHUNKS=25
+RTS_FREQUENCY="${RTS_FREQUENCY:-2000}"  # Accelerator RTS event log frequency in ms.
 POLL_INTERVAL=5
 LOG_TAIL_LINES=50
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
@@ -150,12 +151,12 @@ echo "${BOLD}=== Starting accelerator ===${NC}"
 # Force line-buffered stdout so we see trace output even if the accelerator
 # is killed before Haskell's block buffer flushes.
 stdbuf -oL $GSA \
-  --db "$ACCEL_CACHE" \
   --config "$CONFIG" \
   --rs-src-url "http://127.0.0.1:${CDN_PORT}" \
-  --rs-cache-url "$ACCEL_CACHE" \
+  --cache-dir "$ACCEL_CACHE" \
   --port "$ACCEL_PORT" \
   --max-cached-chunks "$MAX_CACHED_CHUNKS" \
+  --rts-frequency "$RTS_FREQUENCY" \
   +RTS -T -RTS \
   >"$TMPDIR/accelerator.log" 2>&1 &
 ACCEL_PID=$!
