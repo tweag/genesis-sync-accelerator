@@ -52,6 +52,8 @@ data TraceRemoteStorageEvent
     TraceDownloadSuccess String Word64
   | -- | Failed to download a file.
     TraceDownloadFailure TraceDownloadFailure
+  | -- | Starting download of tip metadata.
+    TraceTipFetchStart !String
   deriving (Eq, Show)
 
 -- | Download failure reasons.
@@ -60,8 +62,6 @@ data TraceDownloadFailure
     TraceDownloadException String String
   | -- | Non-200 HTTP status.
     TraceDownloadError String Int
-  | -- | Starting download of tip metadata.
-    TraceTipFetchStart !String
   deriving (Eq, Show)
 
 type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
