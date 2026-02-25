@@ -129,6 +129,6 @@ run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer r
   networkMagic = getNetworkMagic . configBlock $ cfg
 
 data DiffusionConfigError = MissingRemoteConfig
-  deriving (Show)
+  deriving Show
 
 instance Exception DiffusionConfigError

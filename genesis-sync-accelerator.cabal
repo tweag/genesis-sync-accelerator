@@ -40,8 +40,8 @@ executable genesis-sync-accelerator
     GenesisSyncAccelerator.Types
 
   build-depends:
-    async,
     aeson,
+    async,
     base,
     base16-bytestring,
     bytestring,

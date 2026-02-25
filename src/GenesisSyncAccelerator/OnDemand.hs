@@ -43,12 +43,10 @@ import Ouroboros.Consensus.Block
   , CodecConfig
   , ConvertRawHash (..)
   , HasHeader
-  , HeaderHash
   , Header
   , HeaderHash
   , IsEBB (..)
   , NestedCtxt
-  
   , RealPoint (..)
   , SlotNo (..)
   , StandardHash
@@ -77,8 +75,8 @@ import Ouroboros.Consensus.Storage.Serialisation
 import Ouroboros.Consensus.Util.IOLike
   ( IOLike
   , NoThunks
-  , SomeException
   , STM
+  , SomeException
   , StrictTVar
   , atomically
   , newTVarIO
@@ -135,14 +133,14 @@ data OnDemandState blk = OnDemandState
   , odsTip :: Maybe (OnDemandTip blk)
   -- ^ Tip from on-demand data or remote metadata.
   }
-  deriving (Generic)
+  deriving Generic
 
 data OnDemandTip blk = OnDemandTip
   { odtSlot :: SlotNo
   , odtHash :: HeaderHash blk
   , odtBlockNo :: BlockNo
   }
-  deriving (Generic)
+  deriving Generic
 
 deriving instance NoThunks (HeaderHash blk) => NoThunks (OnDemandTip blk)
 
