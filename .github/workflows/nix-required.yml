@@ -8,7 +8,7 @@ on:
 
 jobs:
   nix:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, tweag-infra]
     strategy:
       fail-fast: false
       matrix:
@@ -17,19 +17,7 @@ jobs:
           - required.native
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-            accept-flake-config = true
-
-      - name: Set up Cachix (push)
-        uses: cachix/cachix-action@v16
-        with:
-          name: genesis-sync-accelerator
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/checkout@v6
 
       - name: Build ${{ matrix.target }}
         run: nix build .#hydraJobs.x86_64-linux.${{ matrix.target }} --print-build-logs
