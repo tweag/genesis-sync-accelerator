@@ -12,6 +12,7 @@ module GenesisSyncAccelerator.RemoteStorage
   , FileType (..)
   , RemoteStorageConfig (..)
   , RemoteStorageTracer
+  , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   , getFileName
   , toSuffix

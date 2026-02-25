@@ -16,6 +16,7 @@ import qualified Data.Text.IO as TIO
 import GenesisSyncAccelerator.RemoteStorage
   ( FileType (..)
   , RemoteStorageConfig (..)
+  , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   , downloadChunk
   , getFileName
@@ -79,7 +80,11 @@ prop_downloadChunk_downloads_files_as_expected_when_available =
 prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable :: Property
 prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
   forAll gen_target_chunk_and_file_kernels_and_missing_file_types $ \(targetChunk, fileKernels, expectedMissingFileTypes) ->
-    let expectedErrors = map (\t -> TraceDownloadError (nameFile t targetChunk) 404) expectedMissingFileTypes
+    let httpErrorCode = 404
+        expectedErrors = map (\t -> TraceDownloadError (nameFile t targetChunk) httpErrorCode) expectedMissingFileTypes
+        isExpectedLogLine l =
+          "TraceDownloadFailure (TraceDownloadError " `List.isPrefixOf` l
+            && (" " ++ show httpErrorCode ++ ")") `List.isSuffixOf` l
      in ioProperty $
           Temp.withSystemTempDirectory tmpSub $ \tmp -> do
             let logfile = tmp </> "log.txt"
@@ -93,8 +98,8 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
                 runDownloadChunk tracer setup targetChunk
                 logLines <- lines . Text.unpack <$> TIO.readFile logfile
                 pure $
-                  List.sort (filter ("TraceDownloadError" `List.isPrefixOf`) logLines)
-                    === List.sort (map show expectedErrors)
+                  List.sort (filter isExpectedLogLine logLines)
+                    === List.sort (map (show . TraceDownloadFailure) expectedErrors)
               contents -> do
                 error $ "The target folder is nonempty: " ++ show contents
  where
@@ -229,7 +234,11 @@ nameFile ft cn = Text.unpack $ getFileName ft cn
 -- Run a local HTTP file server of the contents of a temporary subdirectory, and then
 -- call into `downloadChunk` pointing to that server as the source and another temporary
 -- subdirectory as the destination.
-runDownloadChunk :: Tracer IO TraceRemoteStorageEvent -> TestFolderSetup -> ChunkNo -> IO ()
+runDownloadChunk ::
+  Tracer IO TraceRemoteStorageEvent ->
+  TestFolderSetup ->
+  ChunkNo ->
+  IO (Either TraceDownloadFailure [FilePath])
 runDownloadChunk tracer TestFolderSetup{..} targetChunk =
   testWithApplication (pure $ staticApp $ defaultFileServerSettings serverTmpdir) $
     \port -> do
