@@ -103,7 +103,7 @@ echo "  CDN will serve $CHUNK_COUNT chunk(s)"
 # Count total blocks in the source data by dividing secondary index file sizes
 # by the fixed entry size (see ouroboros-consensus Secondary.entrySize, and 
 # section 8.2.2 of "The Cardano Consensus and Storage Layer" (Feb. 9, 2026).
-SECONDARY_ENTRY_SIZE_IN_BYTES=56
+SECONDARY_ENTRY_SIZE_IN_BYTES=56  # = 8 (block offset) + 2 (header offset) + 2 (header size) + 4 (checksum) + 32 (header hash) + 8 (block or EEB)
 EXPECTED_IMMUTABLE=0
 for f in "$CDN_DATA"/*.secondary; do
   EXPECTED_IMMUTABLE=$(( EXPECTED_IMMUTABLE + $(stat -c%s "$f") / SECONDARY_ENTRY_SIZE_IN_BYTES ))
