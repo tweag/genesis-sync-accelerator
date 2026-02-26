@@ -104,11 +104,11 @@ echo "  CDN will serve $CHUNK_COUNT chunk(s)"
 # by the fixed entry size (see ouroboros-consensus Secondary.entrySize, and 
 # section 8.2.2 of "The Cardano Consensus and Storage Layer" (Feb. 9, 2026).
 SECONDARY_ENTRY_SIZE_IN_BYTES=56  # = 8 (block offset) + 2 (header offset) + 2 (header size) + 4 (checksum) + 32 (header hash) + 8 (block or EEB)
-EXPECTED_IMMUTABLE=0
+EXPECTED_IMMUTABLE_BLOCKS_COUNT=0
 for f in "$CDN_DATA"/*.secondary; do
-  EXPECTED_IMMUTABLE=$(( EXPECTED_IMMUTABLE + $(stat -c%s "$f") / SECONDARY_ENTRY_SIZE_IN_BYTES ))
+  EXPECTED_IMMUTABLE_BLOCKS_COUNT=$(( EXPECTED_IMMUTABLE_BLOCKS_COUNT + $(stat -c%s "$f") / SECONDARY_ENTRY_SIZE_IN_BYTES ))
 done
-echo "  Expected ImmutableDB blocks: $EXPECTED_IMMUTABLE"
+echo "  Expected ImmutableDB blocks: $EXPECTED_IMMUTABLE_BLOCKS_COUNT"
 
 demo_is_active && demo_prompt "Source data ready. Press Enter to start components..."
 
@@ -195,7 +195,7 @@ fi
 # ── Phase 1: Wait for consumer to sync ────────────────────────────────────────
 #
 # Poll the consumer's ImmutableDB block count by summing secondary index file
-# sizes, the same way we computed EXPECTED_IMMUTABLE for the source.
+# sizes, the same way we computed EXPECTED_IMMUTABLE_BLOCKS_COUNT for the source.
 # db-analyser can't run while the node holds the ChainDB lock, but the
 # secondary index files are append-only and safe to stat.
 CONSUMER_TIMEOUT="${CONSUMER_TIMEOUT:-300}"
@@ -206,7 +206,7 @@ if demo_is_active; then
 else
   echo "${BOLD}=== Phase 1: Wait for consumer to sync ===${NC}"
 fi
-echo "  Waiting for >=${EXPECTED_IMMUTABLE} blocks in consumer ImmutableDB …"
+echo "  Waiting for >=${EXPECTED_IMMUTABLE_BLOCKS_COUNT} blocks in consumer ImmutableDB …"
 
 ELAPSED=0
 while (( ELAPSED < CONSUMER_TIMEOUT )); do
@@ -219,12 +219,12 @@ while (( ELAPSED < CONSUMER_TIMEOUT )); do
   # Hook C: Richer progress in demo mode
   CACHE_COUNT=$(ls "$ACCEL_CACHE"/*.chunk 2>/dev/null | wc -l)
   if demo_is_active; then
-    echo "  ${ELAPSED}/${CONSUMER_TIMEOUT}s — ${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE} blocks | Cache: ${CACHE_COUNT} chunks"
+    echo "  ${ELAPSED}/${CONSUMER_TIMEOUT}s — ${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE_BLOCKS_COUNT} blocks | Cache: ${CACHE_COUNT} chunks"
   else
-    echo "  ${ELAPSED}/${CONSUMER_TIMEOUT}s — ${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE} blocks in consumer ImmutableDB"
+    echo "  ${ELAPSED}/${CONSUMER_TIMEOUT}s — ${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE_BLOCKS_COUNT} blocks in consumer ImmutableDB"
   fi
 
-  if (( CONSUMER_BLOCKS >= EXPECTED_IMMUTABLE )); then
+  if (( CONSUMER_BLOCKS >= EXPECTED_IMMUTABLE_BLOCKS_COUNT )); then
     echo "  ${GREEN}Consumer ImmutableDB has ${CONSUMER_BLOCKS} blocks${NC}"
     break
   fi
@@ -242,7 +242,7 @@ while (( ELAPSED < CONSUMER_TIMEOUT )); do
 done
 
 if (( ELAPSED >= CONSUMER_TIMEOUT )); then
-  echo "  ${RED}Timeout after ${CONSUMER_TIMEOUT}s (${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE} blocks)${NC}"
+  echo "  ${RED}Timeout after ${CONSUMER_TIMEOUT}s (${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE_BLOCKS_COUNT} blocks)${NC}"
   echo "--- consumer log (last 50 lines) ---"
   tail -"$LOG_TAIL_LINES" "$TMPDIR/node.log" 2>/dev/null || true
   exit 1
@@ -264,7 +264,7 @@ fi
 if demo_is_active; then
   echo ""
   echo "${BOLD}=== Running validation ===${NC}"
-  demo_run_checks_in_panes "$TMPDIR" "$ACCEL_CACHE" "$CDN_DATA" "$CONSUMER_DB" "$CONFIG" "$EXPECTED_IMMUTABLE"
+  demo_run_checks_in_panes "$TMPDIR" "$ACCEL_CACHE" "$CDN_DATA" "$CONSUMER_DB" "$CONFIG" "$EXPECTED_IMMUTABLE_BLOCKS_COUNT"
   VALIDATION_RC=$?
 else
   # ── Phase 2: Consumer validation (db-analyser) ─────────────────────────────
@@ -272,7 +272,7 @@ else
   echo ""
   echo "${BOLD}=== Phase 2: Consumer validation (db-analyser) ===${NC}"
 
-  check_block_count "$CONSUMER_DB" "$CONFIG" "$EXPECTED_IMMUTABLE" || exit 1
+  check_block_count "$CONSUMER_DB" "$CONFIG" "$EXPECTED_IMMUTABLE_BLOCKS_COUNT" || exit 1
 
   # ── Phase 3: Validate accelerator participation ────────────────────────────
 
