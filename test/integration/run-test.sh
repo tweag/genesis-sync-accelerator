@@ -90,6 +90,9 @@ CDN_DATA="$TMPDIR/cdn-data"
 mkdir -p "$ACCEL_CACHE" "$CONSUMER_DB" "$CDN_DATA"
 echo "  Workdir: $TMPDIR"
 
+# Copy the tip file to the CDN data folder so the accelerator can read it.
+cp "$SCRIPT_DIR/tip.json" "$CDN_DATA/tip.json"
+
 # Copy only the first MIN_CHUNKS chunk triplets to serve from the CDN.
 # This keeps the test fast and avoids stale-data issues with large source DBs.
 for chunk_file in $(ls "$IMMUTABLE_SRC"/*.chunk 2>/dev/null | sort | head -n "$MIN_CHUNKS"); do
