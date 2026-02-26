@@ -10,10 +10,11 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-module GenesisSyncAccelerator.MiniProtocols (ChainSyncMessageTracer, ChainSyncEventTracer, genesisSyncAccelerator) where
+module GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator) where
 
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
@@ -27,15 +28,15 @@ import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
+import GenesisSyncAccelerator.Tracing
+  ( BlockFetchEventTracer
+  , ChainSyncEventTracer
+  , Tracers (..)
+  )
 import qualified Network.Mux as Mux
 import Ouroboros.Consensus.Block
-import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
-  ( blockFetchServer'
-  )
-import Ouroboros.Consensus.MiniProtocol.ChainSync.Server
-  ( TraceChainSyncServerEvent
-  , chainSyncServerForFollower
-  )
+import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server (blockFetchServer')
+import Ouroboros.Consensus.MiniProtocol.ChainSync.Server (chainSyncServerForFollower)
 import Ouroboros.Consensus.Network.NodeToNode (Codecs (..))
 import qualified Ouroboros.Consensus.Network.NodeToNode as Consensus.N2N
 import Ouroboros.Consensus.Node (stdVersionDataNTN)
@@ -49,13 +50,11 @@ import Ouroboros.Consensus.Storage.Serialisation
   ( DecodeDisk
   , DecodeDiskDep
   , ReconstructNestedCtxt
-  , SerialisedHeader
   )
 import Ouroboros.Consensus.Util
 import Ouroboros.Consensus.Util.IOLike
 import Ouroboros.Network.Block (ChainUpdate (..), Tip (..))
 import Ouroboros.Network.Driver (runPeer)
-import Ouroboros.Network.Driver.Simple (TraceSendRecv)
 import Ouroboros.Network.KeepAlive (keepAliveServer)
 import Ouroboros.Network.Magic (NetworkMagic)
 import Ouroboros.Network.Mux
@@ -73,18 +72,11 @@ import qualified Ouroboros.Network.NodeToNode as N2N
 import Ouroboros.Network.PeerSelection.PeerSharing (PeerSharing (..))
 import Ouroboros.Network.Protocol.BlockFetch.Server
 import Ouroboros.Network.Protocol.ChainSync.Server
-import Ouroboros.Network.Protocol.ChainSync.Type (ChainSync)
 import Ouroboros.Network.Protocol.Handshake.Version (Version (..))
 import Ouroboros.Network.Protocol.KeepAlive.Server
   ( keepAliveServerPeer
   )
 import "contra-tracer" Control.Tracer
-
-type ChainSyncMessageTracer m blk =
-  Tracer m (TraceSendRecv (ChainSync (SerialisedHeader blk) (Point blk) (Tip blk)))
-
-type ChainSyncEventTracer m blk =
-  Tracer m (TraceChainSyncServerEvent blk)
 
 genesisSyncAccelerator ::
   forall m blk addr h.
@@ -98,8 +90,7 @@ genesisSyncAccelerator ::
   , SerialiseNodeToNodeConstraints blk
   , SupportedNetworkProtocolVersion blk
   ) =>
-  ChainSyncMessageTracer m blk ->
-  ChainSyncEventTracer m blk ->
+  Tracers m blk ->
   CodecConfig blk ->
   (NodeToNodeVersion -> addr -> CBOR.Encoding) ->
   (NodeToNodeVersion -> forall s. CBOR.Decoder s addr) ->
@@ -109,7 +100,7 @@ genesisSyncAccelerator ::
     NodeToNodeVersion
     NodeToNodeVersionData
     (OuroborosApplicationWithMinimalCtx 'Mux.ResponderMode addr BL.ByteString m Void ())
-genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encAddr decAddr onDemand networkMagic = do
+genesisSyncAccelerator Tracers{..} codecCfg encAddr decAddr onDemand networkMagic = do
   forAllVersions application
  where
   forAllVersions ::
@@ -180,9 +171,9 @@ genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encA
       blockFetchProt =
         MiniProtocolCb $ \_ctx channel ->
           withRegistry $
-            runPeer nullTracer cBlockFetchCodecSerialised channel
+            runPeer blockFetchMessageTracer cBlockFetchCodecSerialised channel
               . blockFetchServerPeer
-              . blockFetchServer onDemand ChainDB.getSerialisedBlockWithPoint
+              . blockFetchServer blockFetchEventTracer onDemand ChainDB.getSerialisedBlockWithPoint
       txSubmissionProt =
         -- never reply, there is no timeout
         MiniProtocolCb $ \_ctx _channel -> sleepForever
@@ -214,7 +205,7 @@ chainSyncServer ::
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
-  Tracer m (TraceChainSyncServerEvent blk) ->
+  ChainSyncEventTracer m blk ->
   OnDemand.OnDemandRuntime m blk h ->
   BlockComponent blk (ChainDB.WithPoint blk a) ->
   ResourceRegistry m ->
@@ -293,12 +284,13 @@ blockFetchServer ::
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
+  BlockFetchEventTracer m blk ->
   OnDemand.OnDemandRuntime m blk h ->
   BlockComponent blk (ChainDB.WithPoint blk a) ->
   ResourceRegistry m ->
   BlockFetchServer a (Point blk) m ()
-blockFetchServer onDemand blockComponent _registry =
-  blockFetchServer' nullTracer stream
+blockFetchServer tr onDemand blockComponent _registry =
+  blockFetchServer' tr stream
  where
   stream from to =
     Right . convertIterator

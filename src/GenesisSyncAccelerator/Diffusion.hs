@@ -9,13 +9,10 @@ module GenesisSyncAccelerator.Diffusion (run) where
 import qualified Data.ByteString.Lazy as BL
 import Data.Functor.Contravariant ((>$<))
 import Data.Void (Void)
-import GenesisSyncAccelerator.MiniProtocols
-  ( ChainSyncEventTracer
-  , ChainSyncMessageTracer
-  , genesisSyncAccelerator
-  )
+import GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
+import GenesisSyncAccelerator.Tracing (Tracers)
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
 import Ouroboros.Consensus.Block
@@ -91,13 +88,12 @@ run ::
   Maybe RemoteStorage.RemoteStorageConfig ->
   -- | Maximum number of chunks to keep in cache.
   Int ->
-  ChainSyncMessageTracer IO blk ->
-  ChainSyncEventTracer IO blk ->
+  Tracers IO blk ->
   RemoteStorage.RemoteStorageTracer IO ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer remoteStorageTracer sockAddr cfg =
+run mbRemoteConfig maxCachedChunks tracers remoteStorageTracer sockAddr cfg =
   case mbRemoteConfig of
     Nothing -> throwIO MissingRemoteConfig
     Just remoteCfg -> do
@@ -116,8 +112,7 @@ run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer r
             }
       serve sockAddr $
         genesisSyncAccelerator
-          chainSyncMessageTracer
-          chainSyncEventTracer
+          tracers
           codecCfg
           encodeRemoteAddress
           decodeRemoteAddress
