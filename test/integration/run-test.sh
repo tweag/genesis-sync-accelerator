@@ -105,6 +105,8 @@ echo "  CDN will serve $CHUNK_COUNT chunk(s)"
 # section 8.2.2 of "The Cardano Consensus and Storage Layer" (Feb. 9, 2026).
 SECONDARY_ENTRY_SIZE_IN_BYTES=56  # = 8 (block offset) + 2 (header offset) + 2 (header size) + 4 (checksum) + 32 (header hash) + 8 (block or EEB)
 EXPECTED_IMMUTABLE_BLOCKS_COUNT=0
+# Total expected blocks is the sum of all secondary index file sizes, divided by the entry size.
+# Divide on each loop iteration to reduce risk of overflow.
 for f in "$CDN_DATA"/*.secondary; do
   EXPECTED_IMMUTABLE_BLOCKS_COUNT=$(( EXPECTED_IMMUTABLE_BLOCKS_COUNT + $(stat -c%s "$f") / SECONDARY_ENTRY_SIZE_IN_BYTES ))
 done
