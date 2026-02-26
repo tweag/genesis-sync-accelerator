@@ -56,7 +56,6 @@ main = withStdTerminalHandles $ do
       mbRemoteConfig
       maxCachedChunks
       tracers
-      immDBDir
       sockAddr
       pInfoConfig
 
