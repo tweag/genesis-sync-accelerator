@@ -111,7 +111,7 @@ nix build .#hydraJobs.x86_64-linux.required.formattingLinting --print-build-logs
 nix build .#hydraJobs.x86_64-linux.required.native --print-build-logs
 ```
 
-Replace `x86_64-linux` with your system if different (e.g. `aarch64-darwin`).
+**Replace `x86_64-linux` with your system if different (e.g. `aarch64-darwin`).**
 
 ## How to Contribute
 
