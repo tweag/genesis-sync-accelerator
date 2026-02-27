@@ -12,7 +12,7 @@ Thank you for your interest in contributing! We welcome contributions from the c
 
 Nix is the preferred way of setting up a development environment for this repository.
 
-**Prerequesites**: make sure you have [Nix](https://nixos.org/download.html) installed with flakes support enabled.
+**Prerequisites**: make sure you have [Nix](https://nixos.org/download.html) installed with flakes support enabled.
 
 You can enter a Nix shell with all dependencies by running:
 
