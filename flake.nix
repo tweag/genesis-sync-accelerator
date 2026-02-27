@@ -76,6 +76,7 @@
               pkgs.curl
               pkgs.jq
               pkgs.iproute2
+              pkgs.tmux
             ];
           };
         };

@@ -12,7 +12,7 @@ import Data.Void
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
-import GenesisSyncAccelerator.Tracing (startResourceTracer)
+import GenesisSyncAccelerator.Tracing (Tracers (..), startResourceTracer)
 import GenesisSyncAccelerator.Types (HostAddr)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
@@ -40,9 +40,14 @@ main = withStdTerminalHandles $ do
        where
         hostAddr = Socket.tupleToHostAddress addr
       args = Cardano.CardanoBlockArgs configFile Nothing
-      eventTracer = showTracing stdoutTracer
-      msgTracer = showTracing stdoutTracer
-      remoteStorageTracer = showTracing stdoutTracer
+      tracers =
+        Tracers
+          { blockFetchMessageTracer = showTracing stdoutTracer
+          , blockFetchEventTracer = showTracing stdoutTracer
+          , chainSyncMessageTracer = showTracing stdoutTracer
+          , chainSyncEventTracer = showTracing stdoutTracer
+          , remoteStorageTracer = showTracing stdoutTracer
+          }
   ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer rtsFrequency
@@ -51,9 +56,7 @@ main = withStdTerminalHandles $ do
     <$> Diffusion.run
       mbRemoteConfig
       maxCachedChunks
-      msgTracer
-      eventTracer
-      remoteStorageTracer
+      tracers
       immDBDir
       sockAddr
       pInfoConfig

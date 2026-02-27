@@ -54,6 +54,7 @@ These configuration parameters can be overridden via environment variables.
 | `CDN_PORT` | `3000` | Port for the local HTTP CDN |
 | `ACCEL_PORT` | `3002` | Port for the accelerator |
 | `CONSUMER_PORT` | `3001` | Port for the consumer cardano-node |
+| `DEMO` | *(unset)* | If set to `1`, Start the test in an interactive demo mode (see below) |
 
 ### ConsensusMode
 
@@ -64,3 +65,12 @@ served by the accelerator against the real network.
 ### Cleanup
 
 All background processes are cleaned up on exit. The source chain data is retained in `./test-data`.
+
+## Demo mode
+
+The integration test can optionally be run in a demo mode:
+
+- Test phase transition is controlled by the user by manual key presses.
+- Services output are shown side-by-side in a `tmux` session.
+
+Test logic (service startup, validation) remains identical.

@@ -21,7 +21,11 @@ module GenesisSyncAccelerator.RemoteStorage
 import Control.Exception (SomeException, try)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
-import Data.Word (Word64)
+import GenesisSyncAccelerator.Tracing
+  ( RemoteStorageTracer
+  , TraceDownloadFailure (..)
+  , TraceRemoteStorageEvent (..)
+  )
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
@@ -37,26 +41,6 @@ data RemoteStorageConfig = RemoteStorageConfig
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
   }
-
--- | Events traced by the Remote Storage client.
-data TraceRemoteStorageEvent
-  = -- | Starting download of a file.
-    TraceDownloadStart String
-  | -- | Successfully downloaded a file.
-    TraceDownloadSuccess String Word64
-  | -- | Failed to download a file.
-    TraceDownloadFailure TraceDownloadFailure
-  deriving (Eq, Show)
-
--- | Download failure reasons.
-data TraceDownloadFailure
-  = -- | Exception during download.
-    TraceDownloadException String String
-  | -- | Non-200 HTTP status.
-    TraceDownloadError String Int
-  deriving (Eq, Show)
-
-type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
 
 data FileType = ChunkFile | PrimaryIndexFile | SecondaryIndexFile | EpochFile
   deriving (Eq, Show)

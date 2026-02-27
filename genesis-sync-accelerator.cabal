@@ -81,9 +81,11 @@ library
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
     GenesisSyncAccelerator.Parsers
+    GenesisSyncAccelerator.Tracing
     GenesisSyncAccelerator.Types
 
   build-depends:
+    async,
     base,
     bytestring,
     cborg,
@@ -95,6 +97,7 @@ library
     http-client,
     http-client-tls,
     http-types,
+    io-classes,
     network,
     network-mux,
     ouroboros-consensus,
@@ -105,6 +108,8 @@ library
     ouroboros-network-protocols,
     resource-registry,
     text,
+    trace-dispatcher,
+    trace-resources,
 
 library gsa-testlib
   hs-source-dirs: src/gsa-testlib
