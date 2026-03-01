@@ -1,7 +1,14 @@
 # Genesis Sync Accelerator
+
+Genesis Sync Accelerator speeds up Cardano node synchronization by serving blockchain data directly from a CDN. It speaks the standard Ouroboros network protocols (ChainSync, BlockFetch), so existing Cardano nodes can sync from it without modification — downloading only the chain data they need, on demand.
+This project is among a number of [Tweag's Cardano projects](https://tweag.github.io/cardano-website/).
+
 ## Documentation
 
 - [Using a Genesis Sync Accelerator](./using-an-accelerator.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Code of Conduct](./CODE-OF-CONDUCT.md)
+- [Security](./SECURITY.md)
 
 ## License
 Copyright 2026 Modus Create, LLC.
