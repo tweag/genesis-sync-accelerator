@@ -214,7 +214,6 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
 
 ----------------------------- Helper functions and types -----------------------------
 
--- Name for a temporary subdirectory used in the tests
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "download-test"
 

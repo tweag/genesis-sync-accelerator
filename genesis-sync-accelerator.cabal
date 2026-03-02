@@ -24,7 +24,6 @@ common common-all
 common common-test
   build-depends:
     QuickCheck,
-    quickcheck-instances,
     tasty,
     tasty-quickcheck,
 
@@ -160,6 +159,7 @@ test-suite storage-tests
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
+    quickcheck-instances,
     temporary,
     text,
 
@@ -184,6 +184,7 @@ test-suite download-tests
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
+    quickcheck-instances,
     temporary,
     text,
     wai-app-static,
