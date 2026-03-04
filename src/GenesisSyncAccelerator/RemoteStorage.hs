@@ -136,36 +136,22 @@ fetchTipInfo tracer cfg = do
         then do
           traceWith tracer . TraceDownloadFailure $ TraceDownloadError tipUrl status
           pure Nothing
-        else case eitherDecode (responseBody response) of
-          Left err -> do
-            traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl err
-            pure Nothing
-          Right tipJson ->
-            case decodeTipHash (rtHash tipJson) of
-              Left err -> do
-                traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl err
-                pure Nothing
-              Right hashBytes ->
-                pure $
-                  Just
-                    RemoteTipInfo
-                      { rtiSlot = rtSlot tipJson
-                      , rtiBlockNo = rtBlockNo tipJson
-                      , rtiHashBytes = hashBytes
-                      }
+        else
+          either
+            ( \err -> traceWith tracer (TraceDownloadFailure $ TraceDownloadException tipUrl err) >> pure Nothing
+            )
+            (pure . Just) $
+            eitherDecode (responseBody response)
 
-data RemoteTipJson = RemoteTipJson
-  { rtSlot :: Word64
-  , rtBlockNo :: Word64
-  , rtHash :: Text.Text
-  }
-
-instance FromJSON RemoteTipJson where
-  parseJSON = withObject "RemoteTipJson" $ \o ->
-    RemoteTipJson
+instance FromJSON RemoteTipInfo where
+  parseJSON = withObject "RemoteTipInfo" $ \o ->
+    RemoteTipInfo
       <$> o .: "slot"
       <*> o .: "block_no"
-      <*> o .: "hash"
+      <*> ( o .: "hash" >>= \h -> case decodeTipHash h of
+              Left err -> fail $ "Failed to decode tip hash: " ++ err
+              Right hashBytes -> pure hashBytes
+          )
 
 decodeTipHash :: Text.Text -> Either String BS.ByteString
-decodeTipHash =Base16.decode . Text.encodeUtf8
+decodeTipHash = Base16.decode . Text.encodeUtf8
