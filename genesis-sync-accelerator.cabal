@@ -203,7 +203,6 @@ test-suite on-demand-tests
     -rtsopts
 
   build-depends:
-    QuickCheck,
     contra-tracer,
     exceptions,
     genesis-sync-accelerator,
