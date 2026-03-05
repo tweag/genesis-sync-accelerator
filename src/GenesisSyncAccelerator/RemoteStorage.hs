@@ -23,6 +23,7 @@ module GenesisSyncAccelerator.RemoteStorage
 
 import Control.Exception (SomeException, try)
 import Data.Aeson (FromJSON (..), ToJSON (..), eitherDecode, object, withObject, (.:), (.=))
+import qualified Data.Bifunctor as Bifunctor
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
@@ -117,31 +118,22 @@ downloadFile eventTracer manager cfg chunk fileType = do
   traceWith eventTracer $ TraceDownloadStart filename
   try (httpLbs request manager) >>= either traceEx processResponse
 
-fetchTipInfo :: RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Maybe RemoteTipInfo)
+fetchTipInfo ::
+  RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Either TraceDownloadFailure RemoteTipInfo)
 fetchTipInfo tracer cfg = do
   manager <- newManager tlsManagerSettings
   let tipFileName = "tip.json"
       url = rscSrcUrl cfg
       -- TODO: make this more robust (e.g., handle trailing slash in rscSrcUrl)
       tipUrl = url ++ (if last url == '/' then "" else "/") ++ tipFileName
+      processResponse r =
+        case statusCode (responseStatus r) of
+          200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
+          status -> Left $ TraceDownloadError tipUrl status
   traceWith tracer $ TraceDownloadStart tipUrl
   request <- parseRequest tipUrl
   result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
-  case result of
-    Left ex -> do
-      traceWith tracer . TraceDownloadFailure $ TraceDownloadException tipUrl (show ex)
-      pure Nothing
-    Right response -> do
-      let status = statusCode (responseStatus response)
-      if status /= 200
-        then do
-          traceWith tracer . TraceDownloadFailure $ TraceDownloadError tipUrl status
-          pure Nothing
-        else
-          either
-            (\err -> traceWith tracer (TraceDownloadFailure $ TraceDownloadException tipUrl err) >> pure Nothing)
-            (pure . Just)
-            $ eitherDecode (responseBody response)
+  return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
 
 instance FromJSON RemoteTipInfo where
   parseJSON = withObject "RemoteTipInfo" $ \o ->

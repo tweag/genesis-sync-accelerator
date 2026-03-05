@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -39,6 +40,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
+import GenesisSyncAccelerator.Tracing (TraceRemoteStorageEvent (..))
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , CodecConfig
@@ -87,6 +89,7 @@ import Ouroboros.Consensus.Util.IOLike
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
 import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
+import "contra-tracer" Control.Tracer (traceWith)
 
 -- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
@@ -118,10 +121,12 @@ newOnDemandRuntime ::
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg = do
   stateVar <- newTVarIO (OnDemandState Set.empty [] Nothing)
-  mbTip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
-  case mbTip of
-    Nothing -> pure $ OnDemandRuntime cfg stateVar
-    Just tip -> do
+  errorOrTip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
+  case errorOrTip of
+    Left err -> do
+      liftIO $ traceWith (odcTracer cfg) $ TraceDownloadFailure err
+      pure $ OnDemandRuntime cfg stateVar
+    Right tip -> do
       let tipInfo = tipFromRemote tip
       atomically $ writeTVar stateVar (OnDemandState Set.empty [] (Just tipInfo))
       pure $ OnDemandRuntime cfg stateVar
