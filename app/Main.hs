@@ -34,6 +34,7 @@ main = withStdTerminalHandles $ do
     , remoteStorageCacheDir
     , remoteStorageSrcUrl
     , maxCachedChunks
+    , prefetchAhead
     } <-
     execParser optsParser
   let sockAddr = Socket.SockAddrInet port hostAddr
@@ -60,6 +61,7 @@ main = withStdTerminalHandles $ do
     <$> Diffusion.run
       remoteCfg
       maxCachedChunks
+      prefetchAhead
       tracers
       sockAddr
       pInfoConfig
@@ -87,6 +89,8 @@ data Opts = Opts
   -- ^ Optional CDN URL for the Genesis Sync Accelerator.
   , maxCachedChunks :: Int
   -- ^ Maximum number of chunks to keep in cache.
+  , prefetchAhead :: Int
+  -- ^ Number of chunks to prefetch ahead of current position.
   }
 
 printHost :: (HostAddr, Socket.PortNumber) -> String
@@ -158,6 +162,14 @@ optsParser =
           , value 10
           , showDefault
           ]
+    prefetchAhead <-
+      option auto $
+        mconcat
+          [ long "prefetch-ahead"
+          , help "Number of chunks to prefetch ahead of current position"
+          , value 3
+          , showDefault
+          ]
     pure
       Opts
         { addr
@@ -167,4 +179,5 @@ optsParser =
         , remoteStorageCacheDir
         , remoteStorageSrcUrl
         , maxCachedChunks
+        , prefetchAhead
         }

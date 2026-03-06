@@ -274,6 +274,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
       , odcCodecConfig = codecConfig
       , odcCheckIntegrity = const podcIntegrityConstant
       , odcMaxCachedChunks = podcMaxCachedChunks
+      , odcPrefetchAhead = 3
       }
 
 instance Arbitrary PartialOnDemandConfig where
