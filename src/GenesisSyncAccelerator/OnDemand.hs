@@ -90,7 +90,7 @@ import Ouroboros.Consensus.Util.IOLike
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
 import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
-import "contra-tracer" Control.Tracer (traceWith)
+import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
 -- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
@@ -344,6 +344,7 @@ chunkForTo ci (StreamToInclusive pt) = ChunkLayout.chunkIndexOfSlot ci (realPoin
 mkRawChunkIterator ::
   forall m blk b h.
   ( IOLike m
+  , MonadIO m
   , HasHeader blk
   , DecodeDisk blk (LBS.ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
@@ -397,9 +398,11 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks s
                 hnd
                 (WithBlockSize size entry)
                 component
+            let newTip = tipFromEntry False chunkInfo entry
+            traceWith (showTracing stdoutTracer) $ "Updating on-demand tip to " ++ show newTip
             atomically $ do
               curr <- readTVar stateVar
-              writeTVar stateVar curr{odsTip = Just (tipFromEntry False chunkInfo entry)}
+              writeTVar stateVar curr{odsTip = Just newTip}
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
