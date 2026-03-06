@@ -122,12 +122,11 @@ newOnDemandRuntime ::
 newOnDemandRuntime cfg = do
   stateVar <- newTVarIO (OnDemandState Set.empty [] Nothing)
   errorOrTip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
-  case errorOrTip of
+  case tipFromRemote <$> errorOrTip of
     Left err -> do
       liftIO $ traceWith (odcTracer cfg) $ TraceDownloadFailure err
       pure $ OnDemandRuntime cfg stateVar
-    Right tip -> do
-      let tipInfo = tipFromRemote tip
+    Right tipInfo -> do
       atomically $ writeTVar stateVar (OnDemandState Set.empty [] (Just tipInfo))
       pure $ OnDemandRuntime cfg stateVar
 
