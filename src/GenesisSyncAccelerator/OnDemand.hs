@@ -385,6 +385,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks s
         readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
           ((chunk, WithBlockSize size entry) : rest) -> do
+            traceWith stdoutTracer $ "Serving block at " ++ show (tipToRealPoint chunkInfo entry) ++ " from chunk " ++ show chunk
             atomically $ writeTVar varEntries rest
             -- We open the file for every block. This is inefficient but safe.
             -- Optimization: Keep the file handle open until the chunk changes.
