@@ -87,11 +87,13 @@ run ::
   Maybe RemoteStorage.RemoteStorageConfig ->
   -- | Maximum number of chunks to keep in cache.
   Int ->
+  -- | Number of chunks to prefetch ahead of current position.
+  Int ->
   Tracers IO blk ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run mbRemoteConfig maxCachedChunks tracers sockAddr cfg =
+run mbRemoteConfig maxCachedChunks prefetchAhead tracers sockAddr cfg =
   case mbRemoteConfig of
     Nothing -> throwIO MissingRemoteConfig
     Just remoteCfg -> do
@@ -107,6 +109,7 @@ run mbRemoteConfig maxCachedChunks tracers sockAddr cfg =
             , OnDemand.odcCodecConfig = codecCfg
             , OnDemand.odcCheckIntegrity = nodeCheckIntegrity storageCfg
             , OnDemand.odcMaxCachedChunks = maxCachedChunks
+            , OnDemand.odcPrefetchAhead = prefetchAhead
             }
       serve sockAddr $
         genesisSyncAccelerator

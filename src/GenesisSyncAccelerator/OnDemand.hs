@@ -31,11 +31,14 @@ module GenesisSyncAccelerator.OnDemand
   , tipFromRemote
   ) where
 
+import Control.Concurrent.Async (Async, async, wait)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
 import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
-import Data.List (delete)
+import Data.List (delete, foldl', partition)
+import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -89,8 +92,10 @@ import Ouroboros.Consensus.Util.IOLike
   , StrictTVar
   , atomically
   , newTVarIO
+  , onException
   , readTVar
   , readTVarIO
+  , swapTVar
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
@@ -113,11 +118,25 @@ data OnDemandConfig m blk h = OnDemandConfig
   -- ^ Integrity check for extracted blocks.
   , odcMaxCachedChunks :: Int
   -- ^ Maximum number of chunks to keep in cache.
+  , odcPrefetchAhead :: Int
+  -- ^ Number of chunks to prefetch ahead of current position.
   }
+
+-- | Combined state for in-flight downloads and pin counts.
+data PrefetchJobs = PrefetchJobs
+  { pjDownloads :: !(Map.Map ChunkNo (Async (Either Remote.TraceDownloadFailure [FilePath])))
+  -- ^ In-flight download jobs, keyed by chunk number.
+  , pjPinnedChunks :: !(Map.Map ChunkNo Int)
+  -- ^ Reference-counted pinned chunks, protected from LRU eviction.
+  }
+
+-- | Shared state for coordinating prefetch downloads across iterators.
+newtype PrefetchState = PrefetchState {psJobs :: MVar PrefetchJobs}
 
 data OnDemandRuntime m blk h = OnDemandRuntime
   { odrConfig :: OnDemandConfig m blk h
   , odrState :: StrictTVar m (OnDemandState blk)
+  , odrPrefetch :: PrefetchState
   }
 
 -- | Initializes the on-demand runtime by fetching the current tip from the remote storage.
@@ -129,7 +148,8 @@ newOnDemandRuntime ::
 newOnDemandRuntime cfg = do
   tip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg) >>= procTip . fmap tipFromRemote
   stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
-  pure $ OnDemandRuntime cfg stateVar
+  prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
+  pure $ OnDemandRuntime cfg stateVar prefetch
  where
   procTip = either (\e -> traceWith (odcTracer cfg) (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
@@ -174,8 +194,8 @@ onDemandIteratorForRange ::
   StreamFrom blk ->
   StreamTo blk ->
   m (Iterator m blk b)
-onDemandIteratorForRange OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from to =
-  mkOnDemandIterator cfg odrState component from (Just to) (getChunksInRange odcChunkInfo from to)
+onDemandIteratorForRange OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState, odrPrefetch} component from to =
+  mkOnDemandIterator cfg odrPrefetch odrState component from (Just to) (getChunksInRange odcChunkInfo from to)
 
 onDemandIteratorFrom ::
   forall m blk h b.
@@ -191,13 +211,14 @@ onDemandIteratorFrom ::
   BlockComponent blk b ->
   StreamFrom blk ->
   m (Iterator m blk b)
-onDemandIteratorFrom OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from =
-  mkOnDemandIterator cfg odrState component from Nothing (chunksFrom odcChunkInfo from)
+onDemandIteratorFrom OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState, odrPrefetch} component from =
+  mkOnDemandIterator cfg odrPrefetch odrState component from Nothing (chunksFrom odcChunkInfo from)
 
 readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
 readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
 
--- | Creates an iterator that downloads and serves chunks one by one.
+-- | Creates an iterator that downloads and serves chunks one by one,
+-- with background prefetching of upcoming chunks.
 mkOnDemandIterator ::
   forall m blk h b.
   ( IOLike m
@@ -209,17 +230,55 @@ mkOnDemandIterator ::
   , ConvertRawHash blk
   ) =>
   OnDemandConfig m blk h ->
+  PrefetchState ->
   StrictTVar m (OnDemandState blk) ->
   BlockComponent blk b ->
   StreamFrom blk ->
   Maybe (StreamTo blk) ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from to chunks = do
+mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity, odcRemote, odcTracer, odcPrefetchAhead} prefetchState stateVar component from to chunks = do
   varChunks <- newTVarIO chunks
   varCurrentIt <- newTVarIO Nothing
+  {-
+   Track the current prefetch window in a TVar so that chunks can get unpineed:
+   - when the iterator moves forward
+   - or when the iterator is closed (e.g. on exception)
+  -}
+  varPrefetchWindow <- newTVarIO []
 
   let
+    decPin n = if n <= 1 then Nothing else Just (n - 1)
+
+    updatePrefetchWindow newWindow = do
+      oldWindow <- atomically $ swapTVar varPrefetchWindow newWindow
+      liftIO (modifyMVar_ (psJobs prefetchState) $ \pj ->
+        let unpinned = foldl' (\m c -> Map.update decPin c m) (pjPinnedChunks pj) oldWindow
+            pinned   = foldl' (\m c -> Map.insertWith (+) c 1 m) unpinned newWindow
+        in return pj { pjPinnedChunks = pinned })
+        `onException` atomically (writeTVar varPrefetchWindow oldWindow)
+
+    -- Ensure a chunk is available on disk. Returns True if ready, False on failure.
+    ensureChunkAvailable c = do
+      cached <- odsCachedChunks <$> readTVarIO stateVar
+      if Set.member c cached
+        then return True
+        else do
+          result <- liftIO $ awaitDownload odcTracer odcRemote prefetchState c
+          case result of
+            Left _ -> return False
+            Right _ -> do
+              registerInCache cfg prefetchState stateVar c
+              return True
+
+    -- Clean up iterator prefetch state on exception or failure.
+    -- Cleanup consists of unpinning any chunks in the current prefetch window,
+    -- allowing them to be evicted if needed.
+    cleanupOnError = do
+      window <- atomically $ swapTVar varPrefetchWindow []
+      liftIO $ modifyMVar_ (psJobs prefetchState) $ \pj ->
+        return pj { pjPinnedChunks = foldl' (\m c -> Map.update decPin c m) (pjPinnedChunks pj) window }
+
     next = do
       current <- readTVarIO varCurrentIt
       case current of
@@ -237,74 +296,131 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
             [] -> return IteratorExhausted
             (c : rest) -> do
               atomically $ writeTVar varChunks rest
-              -- Download only the current chunk before serving it
-              ok <- ensureChunks cfg stateVar [c]
-              if not ok
-                then return IteratorExhausted
-                else do
-                  it <-
-                    mkRawChunkIterator
-                      odcHasFS
-                      odcChunkInfo
-                      odcCodecConfig
-                      odcCheckIntegrity
-                      component
-                      from
-                      to
-                      [c]
-                  atomically $ writeTVar varCurrentIt (Just it)
-                  next -- Transition to next chunk
+
+              -- Compute and set new active prefetch window.
+              let newWindow = take odcPrefetchAhead rest
+              updatePrefetchWindow newWindow
+
+              -- Start background prefetches for uncached chunks in the window
+              cached <- odsCachedChunks <$> readTVarIO stateVar
+              let uncached = filter (`Set.notMember` cached) newWindow
+              liftIO $ prefetchChunks odcTracer odcRemote prefetchState uncached
+
+              flip onException cleanupOnError $ do
+                -- Download current chunk / wait of download to finish if needed
+                ok <- ensureChunkAvailable c
+                if not ok
+                  then do
+                    cleanupOnError
+                    return IteratorExhausted
+                  else do
+                    it <-
+                      mkRawChunkIterator
+                        odcHasFS
+                        odcChunkInfo
+                        odcCodecConfig
+                        odcCheckIntegrity
+                        component
+                        from
+                        to
+                        [c]
+                    atomically $ writeTVar varCurrentIt (Just it)
+                    next -- Transition to next chunk
+
     hasNext =
       readTVar varCurrentIt >>= \case
         Just it -> iteratorHasNext it
         Nothing -> return Nothing
 
-    close =
+    close = do
       readTVarIO varCurrentIt >>= \case
         Just it -> iteratorClose it
         Nothing -> return ()
+      -- Clean up: unpin the tracked prefetch window.
+      cleanupOnError
 
   return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
 
--- | Ensures that the requested chunks are present on disk, downloading them if necessary.
--- Implements an LRU eviction policy to maintain the 'odcMaxCachedChunks' limit.
-ensureChunks ::
+-- | Atomically start a download for a chunk, or return an existing in-flight job.
+startDownload ::
+  Remote.RemoteStorageTracer IO ->
+  Remote.RemoteStorageConfig ->
+  PrefetchState ->
+  ChunkNo ->
+  IO (Async (Either Remote.TraceDownloadFailure [FilePath]))
+startDownload tracer remoteCfg PrefetchState{psJobs} chunk =
+  modifyMVar psJobs $ \pj ->
+    case Map.lookup chunk (pjDownloads pj) of
+      Just existingJob -> return (pj, existingJob)
+      Nothing -> do
+        job <- async $ Remote.downloadChunk tracer remoteCfg chunk
+        return (pj { pjDownloads = Map.insert chunk job (pjDownloads pj) }, job)
+
+-- | Start a download (idempotent), wait for it, then remove from the job map.
+awaitDownload ::
+  Remote.RemoteStorageTracer IO ->
+  Remote.RemoteStorageConfig ->
+  PrefetchState ->
+  ChunkNo ->
+  IO (Either Remote.TraceDownloadFailure [FilePath])
+awaitDownload tracer remoteCfg ps@PrefetchState{psJobs} chunk = do
+  job <- startDownload tracer remoteCfg ps chunk
+  result <- wait job
+  modifyMVar_ psJobs $ \pj ->
+    return pj { pjDownloads = Map.delete chunk (pjDownloads pj) }
+  return result
+
+-- | Fire-and-forget background downloads for the given chunks.
+prefetchChunks ::
+  Remote.RemoteStorageTracer IO ->
+  Remote.RemoteStorageConfig ->
+  PrefetchState ->
+  [ChunkNo] ->
+  IO ()
+prefetchChunks tracer remoteCfg ps =
+  mapM_ (startDownload tracer remoteCfg ps)
+
+-- | Register a downloaded chunk in the LRU cache, evicting unpinned excess chunks.
+registerInCache ::
   forall m blk h.
   (IOLike m, MonadIO m) =>
   OnDemandConfig m blk h ->
+  PrefetchState ->
   StrictTVar m (OnDemandState blk) ->
+  ChunkNo ->
+  m ()
+registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks} PrefetchState{psJobs} stateVar chunk = do
+  pj <- liftIO $ takeMVar psJobs
+  toPrune <- atomically $ do
+    let pinned = pjPinnedChunks pj
+    curr <- readTVar stateVar
+    let
+      newUsage = chunk : delete chunk (odsUsageOrder curr)
+      newCached = Set.insert chunk (odsCachedChunks curr)
+      -- Split into chunks to keep vs candidates for eviction
+      (stay, candidates) = splitAt odcMaxCachedChunks newUsage
+      -- Only evict unpinned chunks
+      (keepPinned, prune) = partition (\c -> Map.member c pinned) candidates
+      finalUsage = stay ++ keepPinned
+      updatedCached = Set.difference newCached (Set.fromList prune)
+    writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = finalUsage}
+    return prune
+  (do unless (null toPrune) $ mapM_ (deleteChunkFiles odcHasFS) toPrune
+      liftIO $ putMVar psJobs pj
+   ) `onException` liftIO (putMVar psJobs pj)
+
+-- | Download missing chunks and register them in the LRU cache.
+ensureChunks ::
+  (IOLike m, MonadIO m) =>
+  OnDemandRuntime m blk h ->
   [ChunkNo] ->
   m Bool
-ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} stateVar requestedChunks = do
-  -- 1. Identify and download missing chunks
-  state <- readTVarIO stateVar
-  let missingChunks = filter (`Set.notMember` odsCachedChunks state) requestedChunks
-
-  downloadResult <- liftIO $ mapM (Remote.downloadChunk odcTracer odcRemote) missingChunks
-
-  case sequence_ downloadResult of
+ensureChunks OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcRemote, odcTracer}, odrState, odrPrefetch} chunks = do
+  results <- liftIO $ mapM (awaitDownload odcTracer odcRemote odrPrefetch) chunks
+  case sequence results of
     Left _ -> return False
     Right _ -> do
-      -- 2. Update usage order and identify chunks to prune
-      toPrune <- atomically $ do
-        curr <- readTVar stateVar
-        let
-          -- Move requested chunks to the head (most recently used)
-          newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
-          newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
-
-          -- Eviction: if we exceed the limit, prune the least recently used chunks.
-          -- We must keep all chunks currently requested to ensure iterator safety.
-          (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
-          updatedCached = Set.difference newCached (Set.fromList prune)
-
-        writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = stay}
-        return prune
-
-      -- 3. Physically delete pruned chunks from disk
-      unless (null toPrune) $
-        mapM_ (deleteChunkFiles odcHasFS) toPrune
-
+      mapM_ (registerInCache cfg odrPrefetch odrState) chunks
       return True
 
 -- | Deletes the triad of files associated with a chunk.

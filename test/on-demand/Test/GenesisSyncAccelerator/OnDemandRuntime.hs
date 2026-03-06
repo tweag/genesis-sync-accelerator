@@ -147,12 +147,12 @@ test_ensureChunksLRU = do
         runtime <- newOnDemandRuntime config
 
         -- Request chunk 0
-        _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 0]
+        _ <- ensureChunks runtime [ChunkNo 0]
         state0 <- readTVarIO (odrState runtime)
         assertEqual "Cache contains chunk 0" (Set.singleton (ChunkNo 0)) (odsCachedChunks state0)
 
         -- Request chunk 1
-        _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 1]
+        _ <- ensureChunks runtime [ChunkNo 1]
         state1 <- readTVarIO (odrState runtime)
         assertEqual
           "Cache contains chunks 0 and 1"
@@ -160,7 +160,7 @@ test_ensureChunksLRU = do
           (odsCachedChunks state1)
 
         -- Request chunk 2
-        _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 2]
+        _ <- ensureChunks runtime [ChunkNo 2]
         state2 <- readTVarIO (odrState runtime)
         assertEqual
           "Cache contains chunks 1 and 2"
@@ -274,6 +274,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
       , odcCodecConfig = codecConfig
       , odcCheckIntegrity = const podcIntegrityConstant
       , odcMaxCachedChunks = podcMaxCachedChunks
+      , odcPrefetchAhead = 3
       }
 
 instance Arbitrary PartialOnDemandConfig where

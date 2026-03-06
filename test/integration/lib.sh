@@ -98,7 +98,7 @@ check_block_count() {
 check_blockfetch_served() {
   local accel_log="$1"
   local served
-  served=$(grep -c 'TraceBlockFetchServerSendBlock' "$accel_log" 2>/dev/null || echo "0")
+  served=$(grep -c 'TraceBlockFetchServerSendBlock' "$accel_log" 2>/dev/null) || true
   echo "  Accelerator served ${served} block(s) via BlockFetch"
   if (( served > 0 )); then
     echo "  ${GREEN}OK${NC}: Accelerator served blocks"
@@ -113,7 +113,7 @@ check_blockfetch_served() {
 check_cdn_downloads() {
   local cdn_log="$1"
   local count
-  count=$(grep -c '"GET .* HTTP/.*" 200' "$cdn_log" 2>/dev/null || echo "0")
+  count=$(grep -c '"GET .* HTTP/.*" 200' "$cdn_log" 2>/dev/null) || true
   echo "  CDN HTTP 200 responses: ${count}"
   if (( count > 0 )); then
     echo "  ${GREEN}OK${NC}: Accelerator downloaded data from CDN"
@@ -128,7 +128,7 @@ check_cdn_downloads() {
 check_chainsync_messages() {
   local accel_log="$1"
   local count
-  count=$(grep -cE 'MsgRollForward|MsgIntersectFound' "$accel_log" 2>/dev/null || echo "0")
+  count=$(grep -cE 'MsgRollForward|MsgIntersectFound' "$accel_log" 2>/dev/null) || true
   echo "  Accelerator ChainSync messages: ${count}"
   if (( count > 0 )); then
     echo "  ${GREEN}OK${NC}: Accelerator served ChainSync data"
@@ -143,7 +143,7 @@ check_chainsync_messages() {
 check_blockfetch_from_accel() {
   local node_log="$1"
   local count
-  count=$(grep -c 'CompletedBlockFetch.*127\.0\.0\.1' "$node_log" 2>/dev/null || echo "0")
+  count=$(grep -c 'CompletedBlockFetch.*127\.0\.0\.1' "$node_log" 2>/dev/null) || true
   echo "  BlockFetch completions from accelerator (127.0.0.1): ${count}"
   if (( count > 0 )); then
     echo "  ${GREEN}OK${NC}: Blocks were fetched from the accelerator"
