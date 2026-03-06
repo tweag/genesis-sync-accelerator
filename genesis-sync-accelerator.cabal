@@ -85,6 +85,26 @@ executable genesis-sync-accelerator
     trace-resources,
     with-utf8,
 
+executable immdb-get-tip
+  import: common-all
+  hs-source-dirs: tools
+  main-is: immdb-get-tip.hs
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    base,
+    cardano-crypto-class,
+    contra-tracer,
+    fs-api,
+    genesis-sync-accelerator,
+    optparse-applicative,
+    ouroboros-consensus,
+    ouroboros-consensus-cardano:{unstable-cardano-tools},
+    resource-registry,
+    with-utf8,
+
 library
   import: common-all
   hs-source-dirs: src
