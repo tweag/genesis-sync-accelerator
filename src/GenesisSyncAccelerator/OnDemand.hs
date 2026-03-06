@@ -58,7 +58,11 @@ import Ouroboros.Consensus.Block
   , pointSlot
   , realPointSlot
   )
-import Ouroboros.Consensus.Storage.Common (BlockComponent, StreamFrom (..), StreamTo (..))
+import Ouroboros.Consensus.Storage.Common
+  ( BlockComponent (GetHeader)
+  , StreamFrom (..)
+  , StreamTo (..)
+  )
 import Ouroboros.Consensus.Storage.ImmutableDB.API
   ( Iterator (..)
   , IteratorResult (..)
@@ -89,6 +93,7 @@ import Ouroboros.Consensus.Util.IOLike
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
+import Ouroboros.Network.Block (blockHash, blockNo, blockSlot)
 import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
 import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
@@ -166,6 +171,7 @@ onDemandIteratorForRange ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -184,6 +190,7 @@ onDemandIteratorFrom ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -205,6 +212,7 @@ mkOnDemandIterator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -346,6 +354,7 @@ mkRawChunkIterator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (LBS.ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -385,7 +394,8 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks s
         readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
           ((chunk, WithBlockSize size entry) : rest) -> do
-            traceWith stdoutTracer $ "Serving block at " ++ show (tipToRealPoint chunkInfo entry) ++ " from chunk " ++ show chunk
+            traceWith stdoutTracer $
+              "Serving block at " ++ show (tipToRealPoint chunkInfo entry) ++ " from chunk " ++ show chunk
             atomically $ writeTVar varEntries rest
             -- We open the file for every block. This is inefficient but safe.
             -- Optimization: Keep the file handle open until the chunk changes.
@@ -399,7 +409,17 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks s
                 hnd
                 (WithBlockSize size entry)
                 component
-            let newTip = tipFromEntry False chunkInfo entry
+            header <- withFile hasFS (fsPathChunkFile chunk) ReadMode $ \hnd ->
+              extractBlockComponent
+                hasFS
+                chunkInfo
+                chunk
+                codecConfig
+                checkIntegrity
+                hnd
+                (WithBlockSize size entry)
+                GetHeader
+            let newTip = OnDemandTip (blockSlot header) (blockHash header) (blockNo header)
             traceWith (showTracing stdoutTracer) $ "Updating on-demand tip to " ++ show newTip
             atomically $ do
               curr <- readTVar stateVar
@@ -431,12 +451,6 @@ chunksFrom :: ChunkInfo -> StreamFrom blk -> [ChunkNo]
 chunksFrom ci from = iterate nextChunk (chunkForFrom ci from)
  where
   nextChunk (ChunkNo n) = ChunkNo (n + 1)
-
-tipFromEntry :: ConvertRawHash blk => Bool -> ChunkInfo -> Entry blk -> OnDemandTip blk
-tipFromEntry False _ _ = dummyTip
-tipFromEntry True ci entry =
-  let RealPoint slot hash = tipToRealPoint ci entry
-   in OnDemandTip slot hash (BlockNo (unSlotNo slot))
 
 tipFromRemote :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
 tipFromRemote tip =

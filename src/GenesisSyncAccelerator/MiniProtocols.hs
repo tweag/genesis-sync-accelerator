@@ -79,6 +79,7 @@ genesisSyncAccelerator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -196,6 +197,7 @@ chainSyncServer ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -265,15 +267,14 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
         }
 
   getImmutableTip :: STM m (Tip blk)
-  getImmutableTip =
-    maybe TipGenesis (const $ tipFromOnDemandTip OnDemand.dummyTip)
-      <$> OnDemand.readOnDemandTip onDemand
+  getImmutableTip = maybe TipGenesis tipFromOnDemandTip <$> OnDemand.readOnDemandTip onDemand
 
 blockFetchServer ::
   forall m blk a h.
   ( IOLike m
   , MonadIO m
   , HasHeader blk
+  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
