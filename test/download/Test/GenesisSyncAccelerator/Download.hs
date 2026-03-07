@@ -1,3 +1,4 @@
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
@@ -6,6 +7,8 @@
 module Test.GenesisSyncAccelerator.Download (tests) where
 
 import Control.Monad (filterM, foldM, forM_, unless)
+import Control.Monad.Catch (MonadMask)
+import Control.Monad.IO.Class (MonadIO)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes, fromMaybe)
@@ -50,7 +53,7 @@ prop_downloadChunk_downloads_files_as_expected_when_available :: Property
 prop_downloadChunk_downloads_files_as_expected_when_available =
   forAll gen_target_chunk_and_file_kernels $ \(targetChunk, fileKernels) ->
     ioProperty $
-      Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+      withTemp $ \tmp -> do
         -- Establish the files on the server side, and check the precondition that no file is
         -- already present on the client side.
         setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
@@ -84,7 +87,7 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
           "TraceDownloadFailure (TraceDownloadError " `List.isPrefixOf` l
             && (" " ++ show httpErrorCode ++ ")") `List.isSuffixOf` l
      in ioProperty $
-          Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+          withTemp $ \tmp -> do
             let logfile = tmp </> "log.txt"
                 tracer = tracerToFile logfile
             setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
@@ -129,7 +132,7 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
             fileKernels
         allTargetChunkFileNames = List.sort $ getCurrentFilenamesForChunk targetChunk
      in ioProperty $
-          Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+          withTemp $ \tmp -> do
             setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
             preDownloadClientSideFileNames <- List.sort <$> listDirectory clientTmpdir
             preDownloadServerSideFileNames <- listDirectory serverTmpdir
@@ -211,9 +214,8 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
 
 ----------------------------- Helper functions and types -----------------------------
 
--- Name for a temporary subdirectory used in the tests
-tmpSub :: String
-tmpSub = "download-test"
+withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
+withTemp = Temp.withSystemTempDirectory "download-test"
 
 -- Trace values of given type to given file by appending the 'show' representation with a newline.
 tracerToFile :: Show a => FilePath -> Tracer IO a

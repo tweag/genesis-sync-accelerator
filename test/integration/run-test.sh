@@ -35,6 +35,7 @@ ACCEL_PORT="${ACCEL_PORT:-3002}"
 CONSUMER_PORT="${CONSUMER_PORT:-3001}"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 MAX_CACHED_CHUNKS=25
+RTS_FREQUENCY="${RTS_FREQUENCY:-2000}"  # Accelerator RTS event log frequency in ms.
 POLL_INTERVAL=5
 LOG_TAIL_LINES=50
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
@@ -88,6 +89,9 @@ CONSUMER_DB="$TMPDIR/consumer-db"
 CDN_DATA="$TMPDIR/cdn-data"
 mkdir -p "$ACCEL_CACHE" "$CONSUMER_DB" "$CDN_DATA"
 echo "  Workdir: $TMPDIR"
+
+# Copy the tip file to the CDN data folder so the accelerator can read it.
+cp "$SCRIPT_DIR/tip.json" "$CDN_DATA/tip.json"
 
 # Copy only the first MIN_CHUNKS chunk triplets to serve from the CDN.
 # This keeps the test fast and avoids stale-data issues with large source DBs.

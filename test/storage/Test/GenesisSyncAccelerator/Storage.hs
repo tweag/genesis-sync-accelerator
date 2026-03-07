@@ -5,6 +5,8 @@
 module Test.GenesisSyncAccelerator.Storage (tests) where
 
 import Control.Monad (foldM, unless)
+import Control.Monad.Catch (MonadMask)
+import Control.Monad.IO.Class (MonadIO)
 import qualified Data.Text as Text
 import GenesisSyncAccelerator.OnDemand (deleteChunkFiles)
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), getFileName, toSuffix)
@@ -122,7 +124,7 @@ prop_deleteChunkFiles_handles_missing_files :: Property
 prop_deleteChunkFiles_handles_missing_files =
   forAll gen_ChunkNo_and_FilesSetup $ \(chunkNo, fnsSetup@FilesSetup{..}) ->
     ioProperty $
-      Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+      withTemp $ \tmp -> do
         setupFiles tmp fnsSetup
         rmChunk tmp chunkNo
         -- No file should exist after deletion, regardless of its existence before deletion.
@@ -144,7 +146,7 @@ prop_deleteChunkFiles_is_completely_sensitive_to_chunk_number :: Property
 prop_deleteChunkFiles_is_completely_sensitive_to_chunk_number =
   forAll gen_target_chunk_setup_and_expectation_for_deleteChunkFiles $ \(targetChunk, setup, FilesExpectation{..}) ->
     ioProperty $
-      Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+      withTemp $ \tmp -> do
         setupFiles tmp setup
         rmChunk tmp targetChunk
         -- Expected deletions should have all been done.
@@ -155,7 +157,7 @@ prop_deleteChunkFiles_is_completely_specific_to_chunk_number :: Property
 prop_deleteChunkFiles_is_completely_specific_to_chunk_number =
   forAll gen_target_chunk_setup_and_expectation_for_deleteChunkFiles $ \(targetChunk, setup, FilesExpectation{..}) ->
     ioProperty $
-      Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+      withTemp $ \tmp -> do
         setupFiles tmp setup
         rmChunk tmp targetChunk
         -- Expected non-deletions should have all been preserved.
@@ -165,7 +167,7 @@ prop_deleteChunkFiles_is_completely_specific_to_chunk_number =
 prop_deleteChunkFiles_ignores_EpochFile :: ChunkNo -> Property
 prop_deleteChunkFiles_ignores_EpochFile chunkNo =
   ioProperty $
-    Temp.withSystemTempDirectory tmpSub $ \tmp -> do
+    withTemp $ \tmp -> do
       let fns = getAllFilenamesForChunk chunkNo
       setupFiles tmp (FilesSetup fns [])
       rmChunk tmp chunkNo
@@ -173,9 +175,8 @@ prop_deleteChunkFiles_ignores_EpochFile chunkNo =
 
 ----------------------------- Helper functions and types -----------------------------
 
--- Name of tempfolder to use in tests.
-tmpSub :: String
-tmpSub = "storage-test"
+withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
+withTemp = Temp.withSystemTempDirectory "storage-test"
 
 -- Call `deleteChunkFiles`, handling the mapping from `FilePath` to a `HasFS` type.
 rmChunk :: FilePath -> ChunkNo -> IO ()

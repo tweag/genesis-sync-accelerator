@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
+{-# LANGUAGE RecordWildCards #-}
 
 -- | HTTP client for downloading ImmutableDB chunks from a CDN.
 --
@@ -9,18 +10,26 @@
 -- that constitute an ImmutableDB chunk from a remote HTTP server.
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
-  , FileType (..)
+  , fetchTipInfo
   , RemoteStorageConfig (..)
+  , RemoteTipInfo (..)
+  , TraceRemoteStorageEvent (..)
   , RemoteStorageTracer
   , TraceDownloadFailure (..)
-  , TraceRemoteStorageEvent (..)
   , getFileName
   , toSuffix
+  , FileType (..)
   ) where
 
 import Control.Exception (SomeException, try)
+import Data.Aeson (FromJSON (..), ToJSON (..), eitherDecode, object, withObject, (.:), (.=))
+import qualified Data.Bifunctor as Bifunctor
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import Data.Word (Word64)
 import GenesisSyncAccelerator.Tracing
   ( RemoteStorageTracer
   , TraceDownloadFailure (..)
@@ -41,6 +50,14 @@ data RemoteStorageConfig = RemoteStorageConfig
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
   }
+  deriving (Eq, Show)
+
+data RemoteTipInfo = RemoteTipInfo
+  { rtiSlot :: Word64
+  , rtiBlockNo :: Word64
+  , rtiHashBytes :: BS.ByteString
+  }
+  deriving (Eq, Show)
 
 data FileType = ChunkFile | PrimaryIndexFile | SecondaryIndexFile | EpochFile
   deriving (Eq, Show)
@@ -100,3 +117,41 @@ downloadFile eventTracer manager cfg chunk fileType = do
   -- Perform the download
   traceWith eventTracer $ TraceDownloadStart filename
   try (httpLbs request manager) >>= either traceEx processResponse
+
+fetchTipInfo ::
+  RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Either TraceDownloadFailure RemoteTipInfo)
+fetchTipInfo tracer cfg = do
+  manager <- newManager tlsManagerSettings
+  let tipFileName = "tip.json"
+      url = rscSrcUrl cfg
+      -- TODO: make this more robust (e.g., handle trailing slash in rscSrcUrl)
+      tipUrl = url ++ (if last url == '/' then "" else "/") ++ tipFileName
+      processResponse r =
+        case statusCode (responseStatus r) of
+          200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
+          status -> Left $ TraceDownloadError tipUrl status
+  traceWith tracer $ TraceDownloadStart tipUrl
+  request <- parseRequest tipUrl
+  result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
+  return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
+
+instance FromJSON RemoteTipInfo where
+  parseJSON = withObject "RemoteTipInfo" $ \o ->
+    RemoteTipInfo
+      <$> o .: "slot"
+      <*> o .: "block_no"
+      <*> ( o .: "hash" >>= \h -> case decodeTipHash h of
+              Left err -> fail $ "Failed to decode tip hash: " ++ err
+              Right hashBytes -> pure hashBytes
+          )
+
+instance ToJSON RemoteTipInfo where
+  toJSON RemoteTipInfo{..} =
+    object
+      [ "slot" .= rtiSlot
+      , "block_no" .= rtiBlockNo
+      , "hash" .= Text.decodeUtf8 (Base16.encode rtiHashBytes)
+      ]
+
+decodeTipHash :: Text.Text -> Either String BS.ByteString
+decodeTipHash = Base16.decode . Text.encodeUtf8
