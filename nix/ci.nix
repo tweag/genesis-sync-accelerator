@@ -16,7 +16,7 @@ let
         let
           i = p.identifier;
         in
-        i.name == "genesis-sync-accelerator" && i.component-type == "exe";
+        (i.name == "genesis-sync-accelerator" || i.name == "chunk-uploader") && i.component-type == "exe";
       setGitRevs = lib.mapAttrsRecursiveCond (as: !lib.isDerivation as) (
         _: p: if isCardanoExe p then pkgs.set-git-rev p else p
       );
