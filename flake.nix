@@ -70,6 +70,7 @@
           integration-test = pkgs.mkShell {
             packages = [
               pkgs.hsPkgs.hsPkgs.genesis-sync-accelerator.components.exes.genesis-sync-accelerator
+              pkgs.hsPkgs.hsPkgs.chunk-uploader.components.exes.chunk-uploader
               pkgs.hsPkgs.hsPkgs.cardano-node.components.exes.cardano-node
               pkgs.hsPkgs.hsPkgs.ouroboros-consensus-cardano.components.exes.db-analyser
               pkgs.python3
