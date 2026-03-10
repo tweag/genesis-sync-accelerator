@@ -23,7 +23,7 @@ module GenesisSyncAccelerator.OnDemand
   , OnDemandTip (..)
   , OnDemandState (..)
   , deleteChunkFiles
-  , dummyTip
+  , ensureChunks
   , newOnDemandRuntime
   , onDemandIteratorForRange
   , onDemandIteratorFrom
@@ -132,7 +132,7 @@ newOnDemandRuntime ::
   OnDemandConfig m blk h ->
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg = do
-  tip <- liftIO $ getTip False >>= procTip
+  tip <- liftIO $ getTip True >>= procTip
   stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
   pure $ OnDemandRuntime cfg stateVar
  where
@@ -246,18 +246,21 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
             (c : rest) -> do
               atomically $ writeTVar varChunks rest
               -- Download only the current chunk before serving it
-              _ <- ensureChunks cfg stateVar [c]
-              it <-
-                mkRawChunkIterator
-                  odcHasFS
-                  odcChunkInfo
-                  odcCodecConfig
-                  odcCheckIntegrity
-                  component
-                  [c]
-                  stateVar
-              atomically $ writeTVar varCurrentIt (Just it)
-              next -- Transition to next chunk
+              ok <- ensureChunks cfg stateVar [c]
+              if not ok
+                then return IteratorExhausted
+                else do
+                  it <-
+                    mkRawChunkIterator
+                      odcHasFS
+                      odcChunkInfo
+                      odcCodecConfig
+                      odcCheckIntegrity
+                      component
+                      [c]
+                      stateVar
+                  atomically $ writeTVar varCurrentIt (Just it)
+                  next -- Transition to next chunk
     hasNext =
       readTVar varCurrentIt >>= \case
         Just it -> iteratorHasNext it
