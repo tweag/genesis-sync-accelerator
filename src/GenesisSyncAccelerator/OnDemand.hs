@@ -51,6 +51,7 @@ import Ouroboros.Consensus.Block
   , HeaderHash
   , IsEBB (..)
   , NestedCtxt
+  , Point (BlockPoint, GenesisPoint)
   , RealPoint (..)
   , SlotNo (..)
   , StandardHash
@@ -183,7 +184,7 @@ onDemandIteratorForRange ::
   StreamTo blk ->
   m (Iterator m blk b)
 onDemandIteratorForRange OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from to =
-  mkOnDemandIterator cfg odrState component (getChunksInRange odcChunkInfo from to)
+  mkOnDemandIterator cfg odrState component from (Just to) (getChunksInRange odcChunkInfo from to)
 
 onDemandIteratorFrom ::
   forall m blk h b.
@@ -201,7 +202,7 @@ onDemandIteratorFrom ::
   StreamFrom blk ->
   m (Iterator m blk b)
 onDemandIteratorFrom OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from =
-  mkOnDemandIterator cfg odrState component (chunksFrom odcChunkInfo from)
+  mkOnDemandIterator cfg odrState component from Nothing (chunksFrom odcChunkInfo from)
 
 readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
 readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
@@ -221,9 +222,11 @@ mkOnDemandIterator ::
   OnDemandConfig m blk h ->
   StrictTVar m (OnDemandState blk) ->
   BlockComponent blk b ->
+  StreamFrom blk ->
+  Maybe (StreamTo blk) ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component chunks = do
+mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from to chunks = do
   varChunks <- newTVarIO chunks
   varCurrentIt <- newTVarIO Nothing
 
@@ -257,6 +260,8 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
                       odcCodecConfig
                       odcCheckIntegrity
                       component
+                      from
+                      to
                       [c]
                       stateVar
                   atomically $ writeTVar varCurrentIt (Just it)
@@ -370,12 +375,16 @@ mkRawChunkIterator ::
   (blk -> Bool) ->
   -- | The component of the block to stream (e.g., the whole block, just the header, etc.).
   BlockComponent blk b ->
-  -- | Stream lower bound: entries at or after this point are stremed.
+  -- | Stream lower bound: entries at or after this point are streamed.
   -- Note that inclusivity depends on the constructor being used (StreamFromInclusive vs StreamFromExclusive).
+  StreamFrom blk ->
+  -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
+  Maybe (StreamTo blk) ->
+  -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
   StrictTVar m (OnDemandState blk) ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks stateVar = do
+mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks stateVar = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
@@ -387,7 +396,10 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks s
     entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
     return $ map (chunk,) entries
 
-  let flatEntries = concat allEntries
+  let flatEntries =
+        maybe id (applyStreamTo chunkInfo) to
+          . applyStreamFrom chunkInfo from
+          $ concat allEntries
   varEntries <- newTVarIO flatEntries
 
   -- 2. Define the 'iteratorNext' action.
@@ -454,6 +466,43 @@ chunksFrom :: ChunkInfo -> StreamFrom blk -> [ChunkNo]
 chunksFrom ci from = iterate nextChunk (chunkForFrom ci from)
  where
   nextChunk (ChunkNo n) = ChunkNo (n + 1)
+
+-- | Filter entries to honour the 'StreamFrom' lower bound.
+--
+-- For 'StreamFromExclusive pt', drops entries at or before @pt@.
+-- For 'StreamFromInclusive pt', drops entries strictly before @pt@.
+-- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
+-- so a simple 'dropWhile' from the front suffices.
+applyStreamFrom ::
+  Eq (HeaderHash blk) =>
+  ChunkInfo ->
+  StreamFrom blk ->
+  [(ChunkNo, WithBlockSize (Entry blk))] ->
+  [(ChunkNo, WithBlockSize (Entry blk))]
+applyStreamFrom ci = \case
+  StreamFromExclusive GenesisPoint -> id
+  StreamFromExclusive (BlockPoint fromSlot fromHash) ->
+    dropWhile $ \(_, WithBlockSize _ e) ->
+      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
+       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e == fromHash)
+  StreamFromInclusive (RealPoint fromSlot fromHash) ->
+    dropWhile $ \(_, WithBlockSize _ e) ->
+      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
+       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
+
+-- | Filter entries to honour the 'StreamTo' upper bound.
+--
+-- For 'StreamToInclusive pt', takes entries up to and including @pt@.
+-- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
+-- so a simple 'takeWhile' from the front suffices.
+applyStreamTo ::
+  ChunkInfo ->
+  StreamTo blk ->
+  [(ChunkNo, WithBlockSize (Entry blk))] ->
+  [(ChunkNo, WithBlockSize (Entry blk))]
+applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
+  takeWhile $ \(_, WithBlockSize _ e) ->
+    ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
 
 tipFromRemote :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
 tipFromRemote tip =
