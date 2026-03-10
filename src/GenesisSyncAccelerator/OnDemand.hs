@@ -31,7 +31,7 @@ module GenesisSyncAccelerator.OnDemand
   , tipFromRemote
   ) where
 
-import Control.Concurrent.Async (Async, async, wait)
+import Control.Concurrent.Async (Async, async, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
 import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -195,7 +195,14 @@ onDemandIteratorForRange ::
   StreamTo blk ->
   m (Iterator m blk b)
 onDemandIteratorForRange OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState, odrPrefetch} component from to =
-  mkOnDemandIterator cfg odrPrefetch odrState component from (Just to) (getChunksInRange odcChunkInfo from to)
+  mkOnDemandIterator
+    cfg
+    odrPrefetch
+    odrState
+    component
+    from
+    (Just to)
+    (getChunksInRange odcChunkInfo from to)
 
 onDemandIteratorFrom ::
   forall m blk h b.
@@ -381,10 +388,18 @@ awaitDownload ::
   IO (Either Remote.TraceDownloadFailure [FilePath])
 awaitDownload tracer remoteCfg ps@PrefetchState{psJobs} chunk = do
   job <- startDownload tracer remoteCfg ps chunk
-  result <- wait job
-  modifyMVar_ psJobs $ \pj ->
-    return pj{pjDownloads = Map.delete chunk (pjDownloads pj)}
-  return result
+  let cleanup =
+        modifyMVar_ psJobs $ \pj ->
+          return pj{pjDownloads = Map.delete chunk (pjDownloads pj)}
+  outcome <- waitCatch job `onException` cleanup
+  cleanup
+  return $ case outcome of
+    Left ex ->
+      Left $
+        Remote.TraceDownloadException
+          ("chunk " <> show chunk)
+          (show ex)
+    Right result -> result
 
 -- | Fire-and-forget background downloads for the given chunks.
 prefetchChunks ::
