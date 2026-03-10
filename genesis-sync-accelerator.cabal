@@ -198,6 +198,7 @@ test-suite download-tests
     -rtsopts
 
   build-depends:
+    aeson,
     containers,
     contra-tracer,
     directory,
@@ -207,13 +208,17 @@ test-suite download-tests
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
     quickcheck-instances,
+    tasty-hunit,
     temporary,
     text,
+    wai,
+    http-types,
     wai-app-static,
     warp,
 
   other-modules:
     Test.GenesisSyncAccelerator.Download
+    Test.GenesisSyncAccelerator.Download.RemoteTip
 
 test-suite on-demand-tests
   import: common-all, common-test
