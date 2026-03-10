@@ -254,10 +254,12 @@ mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcC
 
     updatePrefetchWindow newWindow = do
       oldWindow <- atomically $ swapTVar varPrefetchWindow newWindow
-      liftIO (modifyMVar_ (psJobs odrPrefetch) $ \pj ->
-        let unpinned = foldl' (\m c -> Map.update decPin c m) (pjPinnedChunks pj) oldWindow
-            pinned   = foldl' (\m c -> Map.insertWith (+) c 1 m) unpinned newWindow
-        in return pj { pjPinnedChunks = pinned })
+      liftIO
+        ( modifyMVar_ (psJobs odrPrefetch) $ \pj ->
+            let unpinned = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) oldWindow
+                pinned = foldl' (\m c -> Map.insertWith (+) c 1 m) unpinned newWindow
+              in return pj{pjPinnedChunks = pinned}
+        )
         `onException` atomically (writeTVar varPrefetchWindow oldWindow)
 
     -- Ensure a chunk is available on disk. Returns True if ready, False on failure.
@@ -279,7 +281,7 @@ mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcC
     cleanupOnError = do
       window <- atomically $ swapTVar varPrefetchWindow []
       liftIO $ modifyMVar_ (psJobs odrPrefetch) $ \pj ->
-        return pj { pjPinnedChunks = foldl' (\m c -> Map.update decPin c m) (pjPinnedChunks pj) window }
+        return pj{pjPinnedChunks = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) window}
 
     next = do
       current <- readTVarIO varCurrentIt
@@ -328,7 +330,6 @@ mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcC
                         [c]
                     atomically $ writeTVar varCurrentIt (Just it)
                     next -- Transition to next chunk
-
     hasNext =
       readTVar varCurrentIt >>= \case
         Just it -> iteratorHasNext it
@@ -356,7 +357,7 @@ startDownload tracer env PrefetchState{psJobs} chunk =
       Just existingJob -> return (pj, existingJob)
       Nothing -> do
         job <- async $ Remote.downloadChunk tracer env chunk
-        return (pj { pjDownloads = Map.insert chunk job (pjDownloads pj) }, job)
+        return (pj{pjDownloads = Map.insert chunk job (pjDownloads pj)}, job)
 
 -- | Start a download (idempotent), wait for it, then remove from the job map.
 awaitDownload ::
@@ -369,7 +370,7 @@ awaitDownload tracer env ps@PrefetchState{psJobs} chunk = do
   job <- startDownload tracer env ps chunk
   result <- wait job
   modifyMVar_ psJobs $ \pj ->
-    return pj { pjDownloads = Map.delete chunk (pjDownloads pj) }
+    return pj{pjDownloads = Map.delete chunk (pjDownloads pj)}
   return result
 
 -- | Fire-and-forget background downloads for the given chunks.
@@ -402,14 +403,16 @@ registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks} PrefetchState{psJob
       -- Split into chunks to keep vs candidates for eviction
       (stay, candidates) = splitAt odcMaxCachedChunks newUsage
       -- Only evict unpinned chunks
-      (keepPinned, prune) = partition (\c -> Map.member c pinned) candidates
+      (keepPinned, prune) = partition (`Map.member` pinned) candidates
       finalUsage = stay ++ keepPinned
       updatedCached = Set.difference newCached (Set.fromList prune)
     writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = finalUsage}
     return prune
-  (do unless (null toPrune) $ mapM_ (deleteChunkFiles odcHasFS) toPrune
+  ( do
+      unless (null toPrune) $ mapM_ (deleteChunkFiles odcHasFS) toPrune
       liftIO $ putMVar psJobs pj
-   ) `onException` liftIO (putMVar psJobs pj)
+    )
+    `onException` liftIO (putMVar psJobs pj)
 
 -- | Download missing chunks and register them in the LRU cache.
 ensureChunks ::
