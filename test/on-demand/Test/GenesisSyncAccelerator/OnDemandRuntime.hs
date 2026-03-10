@@ -296,7 +296,7 @@ tests =
         "newOnDemandRuntime starts with empty cached chunks"
         prop_newOnDemandRuntimeStartsWithEmptyCachedChunks
     , testProperty
-        "newOnDemandRuntime starts with empty usageorder"
+        "newOnDemandRuntime starts with empty usage order"
         prop_newOnDemandRuntimeStartsWithEmptyUsageOrder
     , testProperty
         "newOnDemandRuntime starts with Nothing when remote tip is missing"
