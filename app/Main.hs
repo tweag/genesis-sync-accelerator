@@ -5,8 +5,6 @@
 module Main (main) where
 
 import Cardano.Crypto.Init (cryptoInit)
-import qualified Cardano.Tools.DBAnalyser.Block.Cardano as Cardano
-import Cardano.Tools.DBAnalyser.HasAnalysis (mkProtocolInfo)
 import Data.List (intercalate)
 import Data.Void
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
@@ -14,10 +12,10 @@ import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..), startResourceTracer)
 import GenesisSyncAccelerator.Types (HostAddr)
+import GenesisSyncAccelerator.Util (getTopLevelConfig)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
 import Options.Applicative
-import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
 import System.IO (BufferMode (..), hSetBuffering, stdout)
 import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
@@ -26,8 +24,7 @@ main = withStdTerminalHandles $ do
   hSetBuffering stdout LineBuffering
   cryptoInit
   Opts
-    { immDBDir
-    , addr
+    { addr
     , port
     , configFile
     , rtsFrequency
@@ -39,7 +36,6 @@ main = withStdTerminalHandles $ do
   let sockAddr = Socket.SockAddrInet port hostAddr
        where
         hostAddr = Socket.tupleToHostAddress addr
-      args = Cardano.CardanoBlockArgs configFile Nothing
       tracers =
         Tracers
           { blockFetchMessageTracer = showTracing stdoutTracer
@@ -48,7 +44,7 @@ main = withStdTerminalHandles $ do
           , chainSyncEventTracer = showTracing stdoutTracer
           , remoteStorageTracer = showTracing stdoutTracer
           }
-  ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
+  pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer rtsFrequency
   let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
@@ -57,7 +53,6 @@ main = withStdTerminalHandles $ do
       mbRemoteConfig
       maxCachedChunks
       tracers
-      immDBDir
       sockAddr
       pInfoConfig
 
@@ -65,10 +60,7 @@ type RTSFrequency = Int
 
 -- | Command-line options for the Genesis Sync Accelerator.
 data Opts = Opts
-  { immDBDir :: FilePath
-  -- ^ Local path to the ImmutableDB directory.
-  -- TODO: Is this needed?
-  , addr :: HostAddr
+  { addr :: HostAddr
   -- ^ IP address to bind to.
   , port :: Socket.PortNumber
   -- ^ TCP port to listen on.
@@ -93,16 +85,9 @@ optsParser :: ParserInfo Opts
 optsParser =
   info (helper <*> parse) $ fullDesc <> progDesc desc
  where
-  desc = "Serve an ImmutableDB via ChainSync and BlockFetch"
+  desc = "Serve ImmutableDB chunks via ChainSync and BlockFetch"
 
   parse = do
-    immDBDir <-
-      strOption $
-        mconcat
-          [ long "db"
-          , help "Path to the ImmutableDB"
-          , metavar "PATH"
-          ]
     addr <-
       option (eitherReader parseAddr) $
         mconcat
@@ -137,8 +122,8 @@ optsParser =
     remoteStorageCacheDir <-
       strOption $
         mconcat
-          [ long "rs-cache-url"
-          , help "Path to possible cache dir for the Sync Accelerator"
+          [ long "cache-dir"
+          , help "Local cache directory for downloaded ImmutableDB chunks"
           , value "/tmp/sync-accelerator/"
           , metavar "PATH"
           , showDefault
@@ -162,8 +147,7 @@ optsParser =
           ]
     pure
       Opts
-        { immDBDir
-        , addr
+        { addr
         , port
         , configFile
         , rtsFrequency

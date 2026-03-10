@@ -5,6 +5,8 @@ license: Apache-2.0
 author: Modus Create, LLC.
 maintainer: erin.vanderveen@tweag.io
 build-type: Simple
+data-files:
+  test/data/**/*.json
 
 common common-all
   ghc-options:
@@ -24,7 +26,6 @@ common common-all
 common common-test
   build-depends:
     QuickCheck,
-    quickcheck-instances,
     tasty,
     tasty-quickcheck,
 
@@ -48,9 +49,12 @@ executable genesis-sync-accelerator
     GenesisSyncAccelerator.RemoteStorage
     GenesisSyncAccelerator.Tracing
     GenesisSyncAccelerator.Types
+    GenesisSyncAccelerator.Util
 
   build-depends:
+    aeson,
     async,
+    base16-bytestring,
     bytestring,
     cardano-crypto-class,
     cborg,
@@ -67,8 +71,10 @@ executable genesis-sync-accelerator
     network-mux,
     optparse-applicative,
     ouroboros-consensus,
+    ouroboros-consensus-cardano,
     ouroboros-consensus-cardano:unstable-cardano-tools,
     ouroboros-consensus-diffusion,
+    ouroboros-consensus-protocol,
     ouroboros-network,
     ouroboros-network-api,
     ouroboros-network-framework,
@@ -79,22 +85,45 @@ executable genesis-sync-accelerator
     trace-resources,
     with-utf8,
 
+executable immdb-get-tip
+  import: common-all
+  hs-source-dirs: tools
+  main-is: immdb-get-tip.hs
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    base,
+    cardano-crypto-class,
+    contra-tracer,
+    fs-api,
+    genesis-sync-accelerator,
+    optparse-applicative,
+    ouroboros-consensus,
+    ouroboros-consensus-cardano:{unstable-cardano-tools},
+    resource-registry,
+    with-utf8,
+
 library
   import: common-all
   hs-source-dirs: src
   exposed-modules:
     GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.RemoteStorage
+    GenesisSyncAccelerator.Tracing
+    GenesisSyncAccelerator.Types
+    GenesisSyncAccelerator.Util
 
   other-modules:
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
     GenesisSyncAccelerator.Parsers
-    GenesisSyncAccelerator.Tracing
-    GenesisSyncAccelerator.Types
 
   build-depends:
+    aeson,
     async,
+    base16-bytestring,
     bytestring,
     cborg,
     containers,
@@ -109,7 +138,10 @@ library
     network,
     network-mux,
     ouroboros-consensus,
+    ouroboros-consensus-cardano,
+    ouroboros-consensus-cardano:unstable-cardano-tools,
     ouroboros-consensus-diffusion,
+    ouroboros-consensus-protocol,
     ouroboros-network,
     ouroboros-network-api,
     ouroboros-network-framework,
@@ -143,11 +175,13 @@ test-suite storage-tests
 
   build-depends:
     directory,
+    exceptions,
     filepath,
     fs-api,
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
+    quickcheck-instances,
     temporary,
     text,
 
@@ -164,17 +198,59 @@ test-suite download-tests
     -rtsopts
 
   build-depends:
+    aeson,
     containers,
     contra-tracer,
     directory,
+    exceptions,
     filepath,
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
+    http-types,
     ouroboros-consensus,
+    quickcheck-instances,
+    tasty-hunit,
+    temporary,
+    text,
+    wai,
+    wai-app-static,
+    warp,
+
+  other-modules:
+    Test.GenesisSyncAccelerator.Download
+    Test.GenesisSyncAccelerator.Download.RemoteTip
+
+test-suite on-demand-tests
+  import: common-all, common-test
+  main-is: Main.hs
+  hs-source-dirs: test/on-demand
+  type: exitcode-stdio-1.0
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    aeson,
+    bytestring,
+    containers,
+    contra-tracer,
+    directory,
+    exceptions,
+    filepath,
+    fs-api,
+    genesis-sync-accelerator,
+    genesis-sync-accelerator:gsa-testlib,
+    ouroboros-consensus,
+    ouroboros-consensus-cardano,
+    strict-checked-vars,
+    tasty,
+    tasty-hunit,
+    tasty-quickcheck,
     temporary,
     text,
     wai-app-static,
     warp,
 
   other-modules:
-    Test.GenesisSyncAccelerator.Download
+    Paths_genesis_sync_accelerator
+    Test.GenesisSyncAccelerator.OnDemandRuntime

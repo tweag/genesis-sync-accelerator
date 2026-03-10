@@ -40,10 +40,9 @@ start_cdn() {
 start_accelerator() {
   local cache_dir="$1" config="$2" cdn_url="$3" port="$4" max_chunks="$5" log_file="$6"
   stdbuf -oL ${GSA:-genesis-sync-accelerator} \
-    --db "$cache_dir" \
     --config "$config" \
     --rs-src-url "$cdn_url" \
-    --rs-cache-url "$cache_dir" \
+    --cache-dir "$cache_dir" \
     --port "$port" \
     --max-cached-chunks "$max_chunks" \
     +RTS -T -RTS \
