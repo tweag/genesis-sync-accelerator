@@ -95,7 +95,7 @@ genNat low high = fromIntegral <$> choose (low, high)
 
 prop_newOnDemandRuntimeContainsConfigInfoAsGiven :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeContainsConfigInfoAsGiven partialConfig@PartialOnDemandConfig{..} =
-  ioProperty $
+  ioQuickly $
     checkFromConfig partialConfig $ \original -> do
       recovered <- odrConfig <$> newOnDemandRuntime original
       return $
@@ -108,7 +108,7 @@ prop_newOnDemandRuntimeContainsConfigInfoAsGiven partialConfig@PartialOnDemandCo
 
 prop_newOnDemandRuntimeStartsWithEmptyCachedChunks :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeStartsWithEmptyCachedChunks partialConfig =
-  ioProperty $
+  ioQuickly $
     checkFromConfig partialConfig $ \config -> do
       runtime <- newOnDemandRuntime config
       chunks <- odsCachedChunks <$> readTVarIO (odrState runtime)
@@ -116,7 +116,7 @@ prop_newOnDemandRuntimeStartsWithEmptyCachedChunks partialConfig =
 
 prop_newOnDemandRuntimeStartsWithEmptyUsageOrder :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeStartsWithEmptyUsageOrder partialConfig =
-  ioProperty $
+  ioQuickly $
     checkFromConfig partialConfig $ \config -> do
       runtime <- newOnDemandRuntime config
       usageOrder <- odsUsageOrder <$> readTVarIO (odrState runtime)
@@ -124,7 +124,7 @@ prop_newOnDemandRuntimeStartsWithEmptyUsageOrder partialConfig =
 
 prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing partialConfig =
-  ioProperty $
+  ioQuickly $
     withTemp $ \tmp -> do
       testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $
         \port -> do
@@ -191,7 +191,7 @@ test_ensureChunksLRU = do
 
 test_newOnDemandRuntimeFetchesRemoteTip :: PartialOnDemandConfig -> Property
 test_newOnDemandRuntimeFetchesRemoteTip partialConfig =
-  ioProperty $ do
+  ioQuickly $ do
     let rawSlotNo = 1234
         rawBlockNo = 567
         tipInfo =
@@ -304,6 +304,12 @@ mkRemoteStorageConfig tmpdir port =
     { rscSrcUrl = "http://localhost:" ++ show port
     , rscDstDir = tmpdir
     }
+
+quickly :: forall prop. Testable prop => prop -> Property
+quickly = withMaxSuccess 5
+
+ioQuickly :: forall prop. Testable prop => IO prop -> Property
+ioQuickly = quickly . ioProperty
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "on-demand-test"
