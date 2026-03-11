@@ -31,7 +31,7 @@ module GenesisSyncAccelerator.OnDemand
   , tipFromRemote
   ) where
 
-import Control.Concurrent.Async (Async, async, waitCatch)
+import Control.Concurrent.Async (Async, async, cancelMany, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
 import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -280,8 +280,25 @@ mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcC
     -- allowing them to be evicted if needed.
     cleanupOnError = do
       window <- atomically $ swapTVar varPrefetchWindow []
-      liftIO $ modifyMVar_ (psJobs odrPrefetch) $ \pj ->
-        return pj{pjPinnedChunks = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) window}
+      jobsToCancel <- liftIO $ modifyMVar (psJobs odrPrefetch) $ \pj ->
+        let unpinned = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) window
+            -- Collect download jobs for chunks that are no longer pinned
+            (removedJobs, remainingDownloads) =
+              foldl'
+                ( \(canceled, dls) c ->
+                    case Map.lookup c unpinned of
+                      Nothing ->
+                        -- Chunk fully unpinned (not expected by another iterator)
+                        -- Download job can be safely canceled.
+                        case Map.lookup c dls of
+                          Just job -> (job : canceled, Map.delete c dls)
+                          Nothing -> (canceled, dls)
+                      Just _ -> (canceled, dls) -- still pinned by another iterator
+                )
+                ([], pjDownloads pj)
+                window
+          in return (pj{pjPinnedChunks = unpinned, pjDownloads = remainingDownloads}, removedJobs)
+      liftIO $ cancelMany jobsToCancel
 
     next = do
       current <- readTVarIO varCurrentIt
@@ -370,16 +387,11 @@ awaitDownload tracer env ps@PrefetchState{psJobs} chunk = do
   job <- startDownload tracer env ps chunk
   let cleanup =
         modifyMVar_ psJobs $ \pj ->
-          return pj{pjDownloads = Map.delete chunk (pjDownloads pj)}
+          return
+            pj{pjDownloads = Map.update (\j -> if j == job then Nothing else Just j) chunk (pjDownloads pj)}
   outcome <- waitCatch job `onException` cleanup
   cleanup
-  return $ case outcome of
-    Left ex ->
-      Left $
-        Remote.TraceDownloadException
-          ("chunk " <> show chunk)
-          (show ex)
-    Right result -> result
+  return $ either (Left . Remote.TraceDownloadException ("chunk " <> show chunk) . show) id outcome
 
 -- | Fire-and-forget background downloads for the given chunks.
 prefetchChunks ::
@@ -429,11 +441,13 @@ ensureChunks ::
   [ChunkNo] ->
   m Bool
 ensureChunks OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcTracer}, odrEnv, odrState, odrPrefetch} chunks = do
-  results <- liftIO $ mapM (awaitDownload odcTracer odrEnv odrPrefetch) chunks
+  cached <- odsCachedChunks <$> readTVarIO odrState
+  let missing = filter (`Set.notMember` cached) chunks
+  results <- liftIO $ mapM (awaitDownload odcTracer odrEnv odrPrefetch) missing
   case sequence_ results of
     Left _ -> return False
     Right _ -> do
-      mapM_ (registerInCache cfg odrPrefetch odrState) chunks
+      mapM_ (registerInCache cfg odrPrefetch odrState) missing
       return True
 
 -- | Deletes the triad of files associated with a chunk.
