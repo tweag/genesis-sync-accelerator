@@ -60,7 +60,7 @@ import Ouroboros.Consensus.Block
   , realPointSlot
   )
 import Ouroboros.Consensus.Storage.Common
-  ( BlockComponent (GetHeader)
+  ( BlockComponent
   , StreamFrom (..)
   , StreamTo (..)
   )
@@ -94,9 +94,8 @@ import Ouroboros.Consensus.Util.IOLike
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
-import Ouroboros.Network.Block (blockHash, blockNo, blockSlot)
 import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
-import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
+import "contra-tracer" Control.Tracer (traceWith)
 
 -- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
@@ -165,7 +164,6 @@ onDemandIteratorForRange ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -184,7 +182,6 @@ onDemandIteratorFrom ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -206,7 +203,6 @@ mkOnDemandIterator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -256,7 +252,6 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
                       from
                       to
                       [c]
-                      stateVar
                   atomically $ writeTVar varCurrentIt (Just it)
                   next -- Transition to next chunk
     hasNext =
@@ -355,7 +350,6 @@ mkRawChunkIterator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (LBS.ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -375,9 +369,8 @@ mkRawChunkIterator ::
   Maybe (StreamTo blk) ->
   -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
-  StrictTVar m (OnDemandState blk) ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks stateVar = do
+mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
@@ -415,21 +408,6 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
                 hnd
                 (WithBlockSize size entry)
                 component
-            header <- withFile hasFS (fsPathChunkFile chunk) ReadMode $ \hnd ->
-              extractBlockComponent
-                hasFS
-                chunkInfo
-                chunk
-                codecConfig
-                checkIntegrity
-                hnd
-                (WithBlockSize size entry)
-                GetHeader
-            let newTip = OnDemandTip (blockSlot header) (blockHash header) (blockNo header)
-            traceWith (showTracing stdoutTracer) $ "Updating on-demand tip to " ++ show newTip
-            atomically $ do
-              curr <- readTVar stateVar
-              writeTVar stateVar curr{odsTip = Just newTip}
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.

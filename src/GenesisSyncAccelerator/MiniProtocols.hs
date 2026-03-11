@@ -79,7 +79,6 @@ genesisSyncAccelerator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -197,7 +196,6 @@ chainSyncServer ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
@@ -274,7 +272,6 @@ blockFetchServer ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , HasHeader (Header blk)
   , DecodeDisk blk (ByteString -> blk)
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
