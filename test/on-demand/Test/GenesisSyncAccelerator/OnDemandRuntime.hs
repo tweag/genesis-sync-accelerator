@@ -103,6 +103,7 @@ prop_newOnDemandRuntimeContainsConfigInfoAsGiven partialConfig@PartialOnDemandCo
           [ odcChunkInfo recovered === podcChunkInfo
           , odcMaxCachedChunks recovered === podcMaxCachedChunks
           , odcRemote recovered === odcRemote original
+          , odcPrefetchAhead recovered === podcPrefetchAhead
           ]
 
 prop_newOnDemandRuntimeStartsWithEmptyCachedChunks :: PartialOnDemandConfig -> Property

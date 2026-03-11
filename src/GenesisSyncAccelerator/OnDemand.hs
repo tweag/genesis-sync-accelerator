@@ -37,7 +37,7 @@ import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
-import Data.List (delete, foldl', partition)
+import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
@@ -323,7 +323,7 @@ mkOnDemandIterator
                 atomically $ writeTVar varChunks rest
 
                 -- Compute and set new active prefetch window.
-                let newWindow = c : take (fromIntegral numPrefetch) rest
+                let newWindow = c : genericTake numPrefetch rest
                 updatePrefetchWindow newWindow
 
                 -- Start background prefetches for uncached chunks in the window
@@ -430,7 +430,7 @@ registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCou
       newUsage = chunk : delete chunk (odsUsageOrder curr)
       newCached = Set.insert chunk (odsCachedChunks curr)
       -- Split into chunks to keep vs candidates for eviction
-      (stay, candidates) = splitAt (fromIntegral numChunks) newUsage
+      (stay, candidates) = genericSplitAt numChunks newUsage
       -- Only evict unpinned chunks
       (keepPinned, prune) = partition (`Map.member` pinned) candidates
       finalUsage = stay ++ keepPinned

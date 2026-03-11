@@ -17,11 +17,11 @@ type HostAddr = (Word8, Word8, Word8, Word8)
 
 -- | Specification of maximum number of chunks to keep in cache
 newtype MaxCachedChunksCount = MaxCachedChunksCount Natural
-  deriving (Eq, Ord, Read, Show)
+  deriving (Eq, Show)
 
 -- | How many chunks ahead of the current to fetch in advance
 newtype PrefetchChunksCount = PrefetchChunksCount Natural
-  deriving (Eq, Ord, Read, Show)
+  deriving (Eq, Show)
 
 -- | The block type typically used across the codebase
 type StandardBlock = CardanoBlock StandardCrypto

@@ -142,21 +142,25 @@ optsParser =
             , metavar "URL"
             ]
     maxCachedChunks <-
-      option auto $
-        mconcat
-          [ long "max-cached-chunks"
-          , help "Maximum number of chunks to keep in cache"
-          , value (MaxCachedChunksCount 10)
-          , showDefault
-          ]
+      MaxCachedChunksCount
+        <$> option
+          auto
+          ( mconcat
+              [ long "max-cached-chunks"
+              , help "Maximum number of chunks to keep in cache"
+              , value 10
+              ]
+          )
     prefetchAhead <-
-      option auto $
-        mconcat
-          [ long "prefetch-ahead"
-          , help "Number of chunks to prefetch ahead of current position"
-          , value (PrefetchChunksCount 3)
-          , showDefault
-          ]
+      PrefetchChunksCount
+        <$> option
+          auto
+          ( mconcat
+              [ long "prefetch-ahead"
+              , help "Number of chunks to prefetch ahead of current position"
+              , value 3
+              ]
+          )
     pure
       Opts
         { addr
