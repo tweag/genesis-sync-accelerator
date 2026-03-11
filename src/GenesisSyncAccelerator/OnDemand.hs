@@ -302,7 +302,7 @@ mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcC
               atomically $ writeTVar varChunks rest
 
               -- Compute and set new active prefetch window.
-              let newWindow = take odcPrefetchAhead rest
+              let newWindow = c : take odcPrefetchAhead rest
               updatePrefetchWindow newWindow
 
               -- Start background prefetches for uncached chunks in the window
