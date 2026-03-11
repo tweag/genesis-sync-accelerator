@@ -97,7 +97,6 @@ downloadFile ::
 downloadFile eventTracer manager cfg chunk fileType = do
   let filename = Text.unpack $ getFileName fileType chunk
       localPath = rscDstDir cfg </> filename
-      failureTracer = contramap TraceDownloadFailure eventTracer
       processResponse r =
         case statusCode (responseStatus r) of
           200 -> do
@@ -105,18 +104,14 @@ downloadFile eventTracer manager cfg chunk fileType = do
             LBS.writeFile localPath body
             traceWith eventTracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
             pure $ Right localPath
-          status ->
-            let e = TraceDownloadError filename status
-             in traceWith failureTracer e >> pure (Left e)
-      traceEx :: SomeException -> IO (Either TraceDownloadFailure FilePath)
-      traceEx ex =
-        let e = TraceDownloadException filename $ show ex
-         in traceWith failureTracer e >> pure (Left e)
+          status -> traceFail $ TraceDownloadError filename status
+      traceFail f = traceWith (contramap TraceDownloadFailure eventTracer) f >> pure (Left f)
   -- Construct request
   request <- parseRequest (rscSrcUrl cfg ++ "/" ++ filename)
   -- Perform the download
   traceWith eventTracer $ TraceDownloadStart filename
-  try (httpLbs request manager) >>= either traceEx processResponse
+  (try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString)))
+    >>= either (traceFail . TraceDownloadException filename . show) processResponse
 
 fetchTipInfo ::
   RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Either TraceDownloadFailure RemoteTipInfo)
