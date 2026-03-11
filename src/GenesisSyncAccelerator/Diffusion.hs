@@ -13,6 +13,7 @@ import GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..))
+import GenesisSyncAccelerator.Types (MaxCachedChunksCount, PrefetchChunksCount)
 import GenesisSyncAccelerator.Util (fpToHasFS)
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
@@ -85,10 +86,8 @@ run ::
   ) =>
   -- | Optional configuration for the Genesis Sync Accelerator (CDN fetching).
   Maybe RemoteStorage.RemoteStorageConfig ->
-  -- | Maximum number of chunks to keep in cache.
-  Int ->
-  -- | Number of chunks to prefetch ahead of current position.
-  Int ->
+  MaxCachedChunksCount ->
+  PrefetchChunksCount ->
   Tracers IO blk ->
   SockAddr ->
   TopLevelConfig blk ->

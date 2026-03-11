@@ -11,7 +11,7 @@ import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..), startResourceTracer)
-import GenesisSyncAccelerator.Types (HostAddr)
+import GenesisSyncAccelerator.Types (HostAddr, MaxCachedChunksCount (..), PrefetchChunksCount (..))
 import GenesisSyncAccelerator.Util (getTopLevelConfig)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
@@ -74,9 +74,9 @@ data Opts = Opts
   -- ^ Location of Sync Accelerator cache.
   , remoteStorageSrcUrl :: Maybe String
   -- ^ Optional CDN URL for the Genesis Sync Accelerator.
-  , maxCachedChunks :: Int
+  , maxCachedChunks :: MaxCachedChunksCount
   -- ^ Maximum number of chunks to keep in cache.
-  , prefetchAhead :: Int
+  , prefetchAhead :: PrefetchChunksCount
   -- ^ Number of chunks to prefetch ahead of current position.
   }
 
@@ -146,7 +146,7 @@ optsParser =
         mconcat
           [ long "max-cached-chunks"
           , help "Maximum number of chunks to keep in cache"
-          , value 10
+          , value (MaxCachedChunksCount 10)
           , showDefault
           ]
     prefetchAhead <-
@@ -154,7 +154,7 @@ optsParser =
         mconcat
           [ long "prefetch-ahead"
           , help "Number of chunks to prefetch ahead of current position"
-          , value 3
+          , value (PrefetchChunksCount 3)
           , showDefault
           ]
     pure

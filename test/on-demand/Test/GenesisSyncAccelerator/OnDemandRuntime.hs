@@ -29,10 +29,15 @@ import GenesisSyncAccelerator.OnDemand
   , readOnDemandTip
   )
 import GenesisSyncAccelerator.RemoteStorage (RemoteStorageConfig (..), RemoteTipInfo (..))
-import GenesisSyncAccelerator.Types (StandardBlock)
+import GenesisSyncAccelerator.Types
+  ( MaxCachedChunksCount (..)
+  , PrefetchChunksCount (..)
+  , StandardBlock
+  )
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (testWithApplication)
+import Numeric.Natural
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , ConvertRawHash (fromRawHash, toRawHash)
@@ -54,7 +59,7 @@ import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Utilities (getCurrentFilenamesForChunk)
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
+import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck (testProperty)
 import "contra-tracer" Control.Tracer (nullTracer)
 
@@ -84,6 +89,9 @@ instance Arbitrary RemoteTipInfo where
         , rtiBlockNo = blockNo
         , rtiHashBytes = toRawHash (Proxy @(CardanoBlock StandardCrypto)) hash
         }
+
+genNat :: Int -> Int -> Gen Natural
+genNat low high = fromIntegral <$> choose (low, high)
 
 prop_newOnDemandRuntimeContainsConfigInfoAsGiven :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeContainsConfigInfoAsGiven partialConfig@PartialOnDemandConfig{..} =
@@ -140,7 +148,8 @@ test_ensureChunksLRU = do
               PartialOnDemandConfig
                 { podcChunkInfo = UniformChunkSize (ChunkSize False 10)
                 , podcIntegrityConstant = True
-                , podcMaxCachedChunks = 2
+                , podcMaxCachedChunks = MaxCachedChunksCount 2 -- This is what's under test.
+                , podcPrefetchAhead = PrefetchChunksCount 0
                 }
         configFile <- getDataFileName topLevelConfigFileRelativePath
         config <- mkFullConfig partialConfig (ConfigFile configFile) (TmpDir cacheDir) port
@@ -179,37 +188,33 @@ test_ensureChunksLRU = do
             exists <- doesFileExist (cacheDir </> fn)
             assertEqual ("Chunk " ++ show n ++ " file " ++ fn ++ " present") True exists
 
-test_newOnDemandRuntimeFetchesRemoteTip :: IO ()
-test_newOnDemandRuntimeFetchesRemoteTip = do
-  let tipInfo =
-        RemoteTipInfo
-          { rtiSlot = 1234
-          , rtiBlockNo = 567
-          , rtiHashBytes = BS.pack $ replicate 32 0x42
-          }
-  withTemp $ \remoteDir -> do
-    LBS.writeFile (remoteDir </> "tip.json") (encode tipInfo)
-
-    withTemp $ \cacheDir -> do
-      testWithApplication (pure $ staticApp $ defaultFileServerSettings remoteDir) $ \port -> do
-        let partialConfig =
-              PartialOnDemandConfig
-                { podcChunkInfo = UniformChunkSize (ChunkSize False 10)
-                , podcIntegrityConstant = True
-                , podcMaxCachedChunks = 2
-                }
-        configFile <- getDataFileName topLevelConfigFileRelativePath
-        config <- mkFullConfig partialConfig (ConfigFile configFile) (TmpDir cacheDir) port
-        mbTip <- newOnDemandRuntime config >>= atomically . readOnDemandTip
-        case mbTip of
-          Nothing -> assertFailure "Failed to fetch tip"
-          Just observedTip -> do
-            assertEqual "Slot matches" (SlotNo 1234) (odtSlot observedTip)
-            assertEqual "BlockNo matches" (BlockNo 567) (odtBlockNo observedTip)
-            assertEqual
-              "Hash matches"
-              (rtiHashBytes tipInfo)
-              (toRawHash (Proxy @StandardBlock) (odtHash observedTip))
+test_newOnDemandRuntimeFetchesRemoteTip :: PartialOnDemandConfig -> Property
+test_newOnDemandRuntimeFetchesRemoteTip partialConfig =
+  ioProperty $ do
+    let rawSlotNo = 1234
+        rawBlockNo = 567
+        tipInfo =
+          RemoteTipInfo
+            { rtiSlot = rawSlotNo
+            , rtiBlockNo = rawBlockNo
+            , rtiHashBytes = BS.pack $ replicate 32 0x42
+            }
+    withTemp $ \remoteDir -> do
+      LBS.writeFile (remoteDir </> "tip.json") (encode tipInfo)
+      withTemp $ \cacheDir -> do
+        testWithApplication (pure $ staticApp $ defaultFileServerSettings remoteDir) $ \port -> do
+          configFile <- getDataFileName topLevelConfigFileRelativePath
+          config <- mkFullConfig partialConfig (ConfigFile configFile) (TmpDir cacheDir) port
+          mbTip <- newOnDemandRuntime config >>= atomically . readOnDemandTip
+          pure $ case mbTip of
+            Nothing -> counterexample "Failed to fetch tip" False
+            Just observedTip ->
+              conjoin
+                [ counterexample "Slot number mismatch" $ SlotNo rawSlotNo === odtSlot observedTip
+                , counterexample "Block number mismatch" $ BlockNo rawBlockNo === odtBlockNo observedTip
+                , counterexample "Hash mismatch" $
+                    rtiHashBytes tipInfo === toRawHash (Proxy @StandardBlock) (odtHash observedTip)
+                ]
 
 ----------------------------- Helper functions, types, and instances -----------------------------
 instance Eq ChunkInfo where
@@ -231,7 +236,8 @@ instance ToJSON (OnDemandTip StandardBlock) where
 data PartialOnDemandConfig = PartialOnDemandConfig
   { podcChunkInfo :: ChunkInfo
   , podcIntegrityConstant :: Bool
-  , podcMaxCachedChunks :: Int
+  , podcMaxCachedChunks :: MaxCachedChunksCount
+  , podcPrefetchAhead :: PrefetchChunksCount
   }
   deriving Show
 
@@ -274,19 +280,21 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
       , odcCodecConfig = codecConfig
       , odcCheckIntegrity = const podcIntegrityConstant
       , odcMaxCachedChunks = podcMaxCachedChunks
-      , odcPrefetchAhead = 3
+      , odcPrefetchAhead = podcPrefetchAhead
       }
 
 instance Arbitrary PartialOnDemandConfig where
   arbitrary = do
     chunkInfo <- arbitrary
     integrity <- arbitrary
-    maxChunks <- choose (1, 100)
+    maxChunks <- MaxCachedChunksCount <$> genNat 0 10
+    numPrefetch <- PrefetchChunksCount <$> genNat 0 10
     return
       PartialOnDemandConfig
         { podcChunkInfo = chunkInfo
         , podcIntegrityConstant = integrity
         , podcMaxCachedChunks = maxChunks
+        , podcPrefetchAhead = numPrefetch
         }
 
 mkRemoteStorageConfig :: FilePath -> Int -> RemoteStorageConfig
@@ -322,7 +330,7 @@ tests =
     , testCase
         "ensureChunks maintains maxCachedChunks through LRU policy"
         test_ensureChunksLRU
-    , testCase
+    , testProperty
         "newOnDemandRuntime fetches tip from remote"
         test_newOnDemandRuntimeFetchesRemoteTip
     ]
