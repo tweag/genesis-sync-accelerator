@@ -31,7 +31,7 @@ module GenesisSyncAccelerator.OnDemand
   , tipFromRemote
   ) where
 
-import Control.Concurrent.Async (Async, async, cancelMany, waitCatch)
+import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
 import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -372,7 +372,18 @@ startDownload ::
 startDownload tracer env PrefetchState{psJobs} chunk =
   modifyMVar psJobs $ \pj ->
     case Map.lookup chunk (pjDownloads pj) of
-      Just existingJob -> return (pj, existingJob)
+      Just existingJob ->
+        poll existingJob >>= \case
+          Nothing ->
+            -- Still running
+            return (pj, existingJob)
+          Just (Right (Right _)) ->
+            -- Completed successfully
+            return (pj, existingJob)
+          Just _ -> do
+            -- Failed (exception or TraceDownloadFailure); retry
+            job <- async $ Remote.downloadChunk tracer env chunk
+            return (pj{pjDownloads = Map.insert chunk job (pjDownloads pj)}, job)
       Nothing -> do
         job <- async $ Remote.downloadChunk tracer env chunk
         return (pj{pjDownloads = Map.insert chunk job (pjDownloads pj)}, job)
