@@ -70,9 +70,8 @@ serve sockAddr application = withIOManager \iocp ->
 
 -- | Main entry point for the ImmutableDB server diffusion layer.
 --
--- This function initializes the database (optionally wrapped with on-demand
--- fetching logic if 'mbRemoteConfig' is provided) and starts the network
--- server to handle 'ChainSync' and 'BlockFetch' requests.
+-- This function initializes the on-demand fetching runtime and starts the
+-- network server to handle 'ChainSync' and 'BlockFetch' requests.
 run ::
   forall blk.
   ( GetPrevHash blk
@@ -83,45 +82,37 @@ run ::
   , NodeInitStorage blk
   , ConfigSupportsNode blk
   ) =>
-  -- | Optional configuration for the Genesis Sync Accelerator (CDN fetching).
-  Maybe RemoteStorage.RemoteStorageConfig ->
+  -- | Configuration for the Genesis Sync Accelerator (CDN fetching)
+  RemoteStorage.RemoteStorageConfig ->
   -- | Maximum number of chunks to keep in cache.
   Int ->
   Tracers IO blk ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run mbRemoteConfig maxCachedChunks tracers sockAddr cfg =
-  case mbRemoteConfig of
-    Nothing -> throwIO MissingRemoteConfig
-    Just remoteCfg -> do
-      let cacheDir = RemoteStorage.rscDstDir remoteCfg
-          hasFS = fpToHasFS cacheDir
-      onDemand <-
-        OnDemand.newOnDemandRuntime
-          OnDemand.OnDemandConfig
-            { OnDemand.odcRemote = remoteCfg
-            , OnDemand.odcTracer = remoteStorageTracer tracers
-            , OnDemand.odcChunkInfo = nodeImmutableDbChunkInfo storageCfg
-            , OnDemand.odcHasFS = hasFS
-            , OnDemand.odcCodecConfig = codecCfg
-            , OnDemand.odcCheckIntegrity = nodeCheckIntegrity storageCfg
-            , OnDemand.odcMaxCachedChunks = maxCachedChunks
-            }
-      serve sockAddr $
-        genesisSyncAccelerator
-          tracers
-          codecCfg
-          encodeRemoteAddress
-          decodeRemoteAddress
-          onDemand
-          networkMagic
+run remoteCfg maxCachedChunks tracers sockAddr cfg = do
+  let cacheDir = RemoteStorage.rscDstDir remoteCfg
+      hasFS = fpToHasFS cacheDir
+  onDemand <-
+    OnDemand.newOnDemandRuntime
+      OnDemand.OnDemandConfig
+        { OnDemand.odcRemote = remoteCfg
+        , OnDemand.odcTracer = remoteStorageTracer tracers
+        , OnDemand.odcChunkInfo = nodeImmutableDbChunkInfo storageCfg
+        , OnDemand.odcHasFS = hasFS
+        , OnDemand.odcCodecConfig = codecCfg
+        , OnDemand.odcCheckIntegrity = nodeCheckIntegrity storageCfg
+        , OnDemand.odcMaxCachedChunks = maxCachedChunks
+        }
+  serve sockAddr $
+    genesisSyncAccelerator
+      tracers
+      codecCfg
+      encodeRemoteAddress
+      decodeRemoteAddress
+      onDemand
+      networkMagic
  where
   codecCfg = configCodec cfg
   storageCfg = configStorage cfg
   networkMagic = getNetworkMagic . configBlock $ cfg
-
-data DiffusionConfigError = MissingRemoteConfig
-  deriving Show
-
-instance Exception DiffusionConfigError

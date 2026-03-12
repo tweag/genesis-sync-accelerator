@@ -5,8 +5,10 @@
 module Main (main) where
 
 import Cardano.Crypto.Init (cryptoInit)
+import Control.Monad.Class.MonadThrow (throwIO)
 import Data.List (intercalate)
 import Data.Void
+import GHC.Exception.Type (Exception)
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
@@ -49,16 +51,25 @@ main = withStdTerminalHandles $ do
   pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer rtsFrequency
-  let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` cacheDir) remoteStorageSrcUrl
+  remoteCfg <-
+    maybe
+      (throwIO MissingRemoteConfig)
+      (pure . (`RemoteStorage.RemoteStorageConfig` cacheDir))
+      remoteStorageSrcUrl
   absurd
     <$> Diffusion.run
-      mbRemoteConfig
+      remoteCfg
       maxCachedChunks
       tracers
       sockAddr
       pInfoConfig
 
 type RTSFrequency = Int
+
+data MissingRemoteConfig = MissingRemoteConfig
+  deriving Show
+
+instance Exception MissingRemoteConfig
 
 -- | Command-line options for the Genesis Sync Accelerator.
 data Opts = Opts
