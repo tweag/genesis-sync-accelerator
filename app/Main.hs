@@ -16,6 +16,7 @@ import GenesisSyncAccelerator.Util (getTopLevelConfig)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
 import Options.Applicative
+import System.Directory (XdgDirectory (XdgCache), getXdgDirectory)
 import System.IO (BufferMode (..), hSetBuffering, stdout)
 import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
@@ -44,10 +45,11 @@ main = withStdTerminalHandles $ do
           , chainSyncEventTracer = showTracing stdoutTracer
           , remoteStorageTracer = showTracing stdoutTracer
           }
+  cacheDir <- maybe (getXdgDirectory XdgCache "genesis-sync-accelerator") pure remoteStorageCacheDir
   pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer rtsFrequency
-  let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
+  let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` cacheDir) remoteStorageSrcUrl
   absurd
     <$> Diffusion.run
       mbRemoteConfig
@@ -68,8 +70,8 @@ data Opts = Opts
   -- ^ Path to the node configuration file.
   , rtsFrequency :: RTSFrequency
   -- ^ Frequency for tracing RTS statistics.
-  , remoteStorageCacheDir :: String
-  -- ^ Location of Sync Accelerator cache.
+  , remoteStorageCacheDir :: Maybe FilePath
+  -- ^ Location of Sync Accelerator cache. 'Nothing' means use the XDG default ($XDG_CACHE_HOME/genesis-sync-accelerator), or $HOME/.cache/genesis-sync-accelerator if $XDG_CACHE_HOME is not set or empty.
   , remoteStorageSrcUrl :: Maybe String
   -- ^ Optional CDN URL for the Genesis Sync Accelerator.
   , maxCachedChunks :: Int
@@ -120,14 +122,14 @@ optsParser =
           , showDefault
           ]
     remoteStorageCacheDir <-
-      strOption $
-        mconcat
-          [ long "cache-dir"
-          , help "Local cache directory for downloaded ImmutableDB chunks"
-          , value "/tmp/sync-accelerator/"
-          , metavar "PATH"
-          , showDefault
-          ]
+      optional $
+        strOption $
+          mconcat
+            [ long "cache-dir"
+            , help
+                "Local cache directory for downloaded ImmutableDB chunks (default: $XDG_CACHE_HOME/genesis-sync-accelerator, or $HOME/.cache/genesis-sync-accelerator)"
+            , metavar "PATH"
+            ]
     remoteStorageSrcUrl <-
       optional $
         strOption $
