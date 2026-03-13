@@ -240,127 +240,145 @@ mkOnDemandIterator ::
   Maybe (StreamTo blk) ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity, odcTracer, odcPrefetchAhead = PrefetchChunksCount numPrefetch}, odrEnv, odrState, odrPrefetch} component from to chunks = do
-  varChunks <- newTVarIO chunks
-  varCurrentIt <- newTVarIO Nothing
-  {-
-   Track the current prefetch window in a TVar so that chunks can get unpinned:
-   - when the iterator moves forward
-   - or when the iterator is closed (e.g. on exception)
-  -}
-  varPrefetchWindow <- newTVarIO []
+mkOnDemandIterator
+  OnDemandRuntime
+    { odrConfig =
+      cfg@OnDemandConfig
+        { odcHasFS
+        , odcChunkInfo
+        , odcCodecConfig
+        , odcCheckIntegrity
+        , odcTracer
+        , odcPrefetchAhead = PrefetchChunksCount numPrefetch
+        }
+    , odrEnv
+    , odrState
+    , odrPrefetch
+    }
+  component
+  from
+  to
+  chunks = do
+    varChunks <- newTVarIO chunks
+    varCurrentIt <- newTVarIO Nothing
+    {-
+     Track the current prefetch window in a TVar so that chunks can get unpinned:
+     - when the iterator moves forward
+     - or when the iterator is closed (e.g. on exception)
+    -}
+    varPrefetchWindow <- newTVarIO []
 
-  let
-    decPin n = if n <= 1 then Nothing else Just (n - 1)
+    let
+      decPin n = if n <= 1 then Nothing else Just (n - 1)
 
-    updatePrefetchWindow newWindow = do
-      oldWindow <- atomically $ swapTVar varPrefetchWindow newWindow
-      liftIO
-        ( modifyMVar_ (psJobs odrPrefetch) $ \pj ->
-            let unpinned = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) oldWindow
-                pinned = foldl' (\m c -> Map.insertWith (+) c 1 m) unpinned newWindow
-              in return pj{pjPinnedChunks = pinned}
-        )
-        `onException` atomically (writeTVar varPrefetchWindow oldWindow)
+      updatePrefetchWindow newWindow = do
+        oldWindow <- atomically $ swapTVar varPrefetchWindow newWindow
+        liftIO
+          ( modifyMVar_ (psJobs odrPrefetch) $ \pj ->
+              let unpinned = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) oldWindow
+                  pinned = foldl' (\m c -> Map.insertWith (+) c 1 m) unpinned newWindow
+               in return pj{pjPinnedChunks = pinned}
+          )
+          `onException` atomically (writeTVar varPrefetchWindow oldWindow)
 
-    -- Ensure a chunk is available on disk. Returns True if ready, False on failure.
-    ensureChunkAvailable c = do
-      cached <- odsCachedChunks <$> readTVarIO odrState
-      if Set.member c cached
-        then return True
-        else do
-          result <- liftIO $ awaitDownload odcTracer odrEnv odrPrefetch c
-          case result of
-            Left _ -> return False
-            Right _ -> do
-              registerInCache cfg odrPrefetch odrState c
-              return True
+      -- Ensure a chunk is available on disk. Returns True if ready, False on failure.
+      ensureChunkAvailable c = do
+        cached <- odsCachedChunks <$> readTVarIO odrState
+        if Set.member c cached
+          then return True
+          else do
+            result <- liftIO $ awaitDownload odcTracer odrEnv odrPrefetch c
+            case result of
+              Left _ -> return False
+              Right _ -> do
+                registerInCache cfg odrPrefetch odrState c
+                return True
 
-    -- Clean up iterator prefetch state on exception or failure.
-    -- Cleanup consists of unpinning any chunks in the current prefetch window,
-    -- allowing them to be evicted if needed.
-    cleanupOnError = do
-      window <- atomically $ swapTVar varPrefetchWindow []
-      jobsToCancel <- liftIO $ modifyMVar (psJobs odrPrefetch) $ \pj ->
-        let unpinned = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) window
-            -- Collect download jobs for chunks that are no longer pinned
-            (removedJobs, remainingDownloads) =
-              foldl'
-                ( \(canceled, dls) c ->
-                    case Map.lookup c unpinned of
-                      Nothing ->
-                        -- Chunk fully unpinned (not expected by another iterator)
-                        -- Download job can be safely canceled.
-                        case Map.lookup c dls of
-                          Just job -> (job : canceled, Map.delete c dls)
-                          Nothing -> (canceled, dls)
-                      Just _ -> (canceled, dls) -- still pinned by another iterator
-                )
-                ([], pjDownloads pj)
-                window
-          in return (pj{pjPinnedChunks = unpinned, pjDownloads = remainingDownloads}, removedJobs)
-      liftIO $ cancelMany jobsToCancel
+      -- Clean up iterator prefetch state on exception or failure.
+      -- Cleanup consists of unpinning any chunks in the current prefetch window,
+      -- allowing them to be evicted if needed.
+      cleanupOnError = do
+        window <- atomically $ swapTVar varPrefetchWindow []
+        jobsToCancel <- liftIO $ modifyMVar (psJobs odrPrefetch) $ \pj ->
+          let unpinned = foldl' (flip (Map.update decPin)) (pjPinnedChunks pj) window
+              -- Collect download jobs for chunks that are no longer pinned
+              (removedJobs, remainingDownloads) =
+                foldl'
+                  ( \(canceled, dls) c ->
+                      case Map.lookup c unpinned of
+                        Nothing ->
+                          -- Chunk fully unpinned (not expected by another iterator)
+                          -- Download job can be safely canceled.
+                          case Map.lookup c dls of
+                            Just job -> (job : canceled, Map.delete c dls)
+                            Nothing -> (canceled, dls)
+                        Just _ -> (canceled, dls) -- still pinned by another iterator
+                  )
+                  ([], pjDownloads pj)
+                  window
+           in return (pj{pjPinnedChunks = unpinned, pjDownloads = remainingDownloads}, removedJobs)
+        liftIO $ cancelMany jobsToCancel
 
-    next = do
-      current <- readTVarIO varCurrentIt
-      case current of
-        Just it -> do
-          res <- iteratorNext it
-          case res of
-            IteratorResult b -> return (IteratorResult b)
-            IteratorExhausted -> do
-              iteratorClose it
-              atomically $ writeTVar varCurrentIt Nothing
-              next -- Transition to next chunk
-        Nothing -> do
-          cs <- readTVarIO varChunks
-          case cs of
-            [] -> return IteratorExhausted
-            (c : rest) -> do
-              atomically $ writeTVar varChunks rest
+      next = do
+        current <- readTVarIO varCurrentIt
+        case current of
+          Just it -> do
+            res <- iteratorNext it
+            case res of
+              IteratorResult b -> return (IteratorResult b)
+              IteratorExhausted -> do
+                iteratorClose it
+                atomically $ writeTVar varCurrentIt Nothing
+                next -- Transition to next chunk
+          Nothing -> do
+            cs <- readTVarIO varChunks
+            case cs of
+              [] -> return IteratorExhausted
+              (c : rest) -> do
+                atomically $ writeTVar varChunks rest
 
-              -- Compute and set new active prefetch window.
-              let newWindow = c : genericTake numPrefetch rest
-              updatePrefetchWindow newWindow
+                -- Compute and set new active prefetch window.
+                let newWindow = c : genericTake numPrefetch rest
+                updatePrefetchWindow newWindow
 
-              -- Start background prefetches for uncached chunks in the window
-              cached <- odsCachedChunks <$> readTVarIO odrState
-              let uncached = filter (`Set.notMember` cached) newWindow
-              liftIO $ prefetchChunks odcTracer odrEnv odrPrefetch uncached
+                -- Start background prefetches for uncached chunks in the window
+                cached <- odsCachedChunks <$> readTVarIO odrState
+                let uncached = filter (`Set.notMember` cached) newWindow
+                liftIO $ prefetchChunks odcTracer odrEnv odrPrefetch uncached
 
-              flip onException cleanupOnError $ do
-                -- Download current chunk / wait of download to finish if needed
-                ok <- ensureChunkAvailable c
-                if not ok
-                  then do
-                    cleanupOnError
-                    return IteratorExhausted
-                  else do
-                    it <-
-                      mkRawChunkIterator
-                        odcHasFS
-                        odcChunkInfo
-                        odcCodecConfig
-                        odcCheckIntegrity
-                        component
-                        from
-                        to
-                        [c]
-                    atomically $ writeTVar varCurrentIt (Just it)
-                    next -- Transition to next chunk
-    hasNext =
-      readTVar varCurrentIt >>= \case
-        Just it -> iteratorHasNext it
-        Nothing -> return Nothing
+                flip onException cleanupOnError $ do
+                  -- Download current chunk / wait of download to finish if needed
+                  ok <- ensureChunkAvailable c
+                  if not ok
+                    then do
+                      cleanupOnError
+                      return IteratorExhausted
+                    else do
+                      it <-
+                        mkRawChunkIterator
+                          odcHasFS
+                          odcChunkInfo
+                          odcCodecConfig
+                          odcCheckIntegrity
+                          component
+                          from
+                          to
+                          [c]
+                      atomically $ writeTVar varCurrentIt (Just it)
+                      next -- Transition to next chunk
+      hasNext =
+        readTVar varCurrentIt >>= \case
+          Just it -> iteratorHasNext it
+          Nothing -> return Nothing
 
-    close = do
-      readTVarIO varCurrentIt >>= \case
-        Just it -> iteratorClose it
-        Nothing -> return ()
-      -- Clean up: unpin the tracked prefetch window.
-      cleanupOnError
+      close = do
+        readTVarIO varCurrentIt >>= \case
+          Just it -> iteratorClose it
+          Nothing -> return ()
+        -- Clean up: unpin the tracked prefetch window.
+        cleanupOnError
 
-  return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
+    return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
 
 -- | Atomically start a download for a chunk, or return an existing in-flight job.
 startDownload ::
