@@ -111,8 +111,7 @@ Prefetching has interactions with cache: prefetched chunks are protected from ca
 eviction as long as they are within the prefetch window of at least one client.
 
 **NOTE:** While the necessity of prefetching has been theorized based on how the
-devoted `BlockFetch` logic works and certainly increases performance, its ability to
-actually prevent the accelerator from being demoted has not yet been observed experimentally.
+devoted `BlockFetch` logic works and certainly increases performance, there has not yet been opportunity to observe whether this can prevent the accelerator from being demoted.
 
 ## Deployment
 

@@ -46,6 +46,7 @@ import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import GenesisSyncAccelerator.Tracing (TraceRemoteStorageEvent (..))
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
+import qualified Network.HTTP.Client as HTTP
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , CodecConfig
@@ -136,7 +137,7 @@ newtype PrefetchState = PrefetchState {psJobs :: MVar PrefetchJobs}
 
 data OnDemandRuntime m blk h = OnDemandRuntime
   { odrConfig :: OnDemandConfig m blk h
-  , odrEnv :: Remote.RemoteStorageEnv
+  , odrManager :: HTTP.Manager
   , odrState :: StrictTVar m (OnDemandState blk)
   , odrPrefetch :: PrefetchState
   }
@@ -147,16 +148,14 @@ newOnDemandRuntime ::
   (IOLike m, MonadIO m, StandardHash blk, ConvertRawHash blk) =>
   OnDemandConfig m blk h ->
   m (OnDemandRuntime m blk h)
-newOnDemandRuntime cfg = do
-  env <-
-    liftIO $
-      Remote.newRemoteStorageEnv (Remote.rscSrcUrl (odcRemote cfg)) (Remote.rscDstDir (odcRemote cfg))
-  tip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) env >>= procTip . fmap tipFromRemote
+newOnDemandRuntime cfg@OnDemandConfig{odcRemote, odcTracer} = do
+  env <- liftIO $ Remote.newRemoteStorageEnv (Remote.rscSrcUrl odcRemote) (Remote.rscDstDir odcRemote)
+  tip <- liftIO $ Remote.fetchTipInfo odcTracer env >>= procTip . fmap tipFromRemote
   stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
   prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
-  pure $ OnDemandRuntime cfg env stateVar prefetch
+  pure $ OnDemandRuntime cfg (Remote.rseManager env) stateVar prefetch
  where
-  procTip = either (\e -> traceWith (odcTracer cfg) (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
+  procTip = either (\e -> traceWith odcTracer (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
 -- | Internal state tracking which chunks have been downloaded during the current session.
 data OnDemandState blk = OnDemandState
@@ -244,14 +243,15 @@ mkOnDemandIterator
   OnDemandRuntime
     { odrConfig =
       cfg@OnDemandConfig
-        { odcHasFS
+        { odcRemote
+        , odcHasFS
         , odcChunkInfo
         , odcCodecConfig
         , odcCheckIntegrity
         , odcTracer
         , odcPrefetchAhead = PrefetchChunksCount numPrefetch
         }
-    , odrEnv
+    , odrManager
     , odrState
     , odrPrefetch
     }
@@ -269,6 +269,7 @@ mkOnDemandIterator
     varPrefetchWindow <- newTVarIO []
 
     let
+      remoteEnv = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
       decPin n = if n <= 1 then Nothing else Just (n - 1)
 
       updatePrefetchWindow newWindow = do
@@ -287,7 +288,7 @@ mkOnDemandIterator
         if Set.member c cached
           then return True
           else do
-            result <- liftIO $ awaitDownload odcTracer odrEnv odrPrefetch c
+            result <- liftIO $ awaitDownload odcTracer remoteEnv odrPrefetch c
             case result of
               Left _ -> return False
               Right _ -> do
@@ -337,17 +338,16 @@ mkOnDemandIterator
               (c : rest) -> do
                 atomically $ writeTVar varChunks rest
 
-                -- Compute and set new active prefetch window.
-                let newWindow = c : genericTake numPrefetch rest
-                updatePrefetchWindow newWindow
-
-                -- Start background prefetches for uncached chunks in the window
-                cached <- odsCachedChunks <$> readTVarIO odrState
-                let uncached = filter (`Set.notMember` cached) newWindow
-                liftIO $ prefetchChunks odcTracer odrEnv odrPrefetch uncached
-
                 flip onException cleanupOnError $ do
-                  -- Download current chunk / wait of download to finish if needed
+                  -- Compute and set new active prefetch window.
+                  let newWindow = c : genericTake numPrefetch rest
+                  updatePrefetchWindow newWindow
+
+                  -- Start background prefetches for uncached chunks in the window
+                  cached <- odsCachedChunks <$> readTVarIO odrState
+                  let uncached = filter (`Set.notMember` cached) newWindow
+                  liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
+
                   ok <- ensureChunkAvailable c
                   if not ok
                     then do
@@ -366,15 +366,10 @@ mkOnDemandIterator
                           [c]
                       atomically $ writeTVar varCurrentIt (Just it)
                       next -- Transition to next chunk
-      hasNext =
-        readTVar varCurrentIt >>= \case
-          Just it -> iteratorHasNext it
-          Nothing -> return Nothing
+      hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
 
       close = do
-        readTVarIO varCurrentIt >>= \case
-          Just it -> iteratorClose it
-          Nothing -> return ()
+        readTVarIO varCurrentIt >>= maybe (return ()) iteratorClose
         -- Clean up: unpin the tracked prefetch window.
         cleanupOnError
 
@@ -444,21 +439,21 @@ registerInCache ::
   m ()
 registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCount numChunks} PrefetchState{psJobs} stateVar chunk = do
   pj <- liftIO $ takeMVar psJobs
-  toPrune <- atomically $ do
-    let pinned = pjPinnedChunks pj
-    curr <- readTVar stateVar
-    let
-      newUsage = chunk : delete chunk (odsUsageOrder curr)
-      newCached = Set.insert chunk (odsCachedChunks curr)
-      -- Split into chunks to keep vs candidates for eviction
-      (stay, candidates) = genericSplitAt numChunks newUsage
-      -- Only evict unpinned chunks
-      (keepPinned, prune) = partition (`Map.member` pinned) candidates
-      finalUsage = stay ++ keepPinned
-      updatedCached = Set.difference newCached (Set.fromList prune)
-    writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = finalUsage}
-    return prune
   ( do
+      toPrune <- atomically $ do
+        let pinned = pjPinnedChunks pj
+        curr <- readTVar stateVar
+        let
+          newUsage = chunk : delete chunk (odsUsageOrder curr)
+          newCached = Set.insert chunk (odsCachedChunks curr)
+          -- Split into chunks to keep vs candidates for eviction
+          (stay, candidates) = genericSplitAt numChunks newUsage
+          -- Only evict unpinned chunks
+          (keepPinned, prune) = partition (`Map.member` pinned) candidates
+          finalUsage = stay ++ keepPinned
+          updatedCached = Set.difference newCached (Set.fromList prune)
+        writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = finalUsage}
+        return prune
       unless (null toPrune) $ mapM_ (deleteChunkFiles odcHasFS) toPrune
       liftIO $ putMVar psJobs pj
     )
@@ -470,15 +465,23 @@ ensureChunks ::
   OnDemandRuntime m blk h ->
   [ChunkNo] ->
   m Bool
-ensureChunks OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcTracer}, odrEnv, odrState, odrPrefetch} chunks = do
-  cached <- odsCachedChunks <$> readTVarIO odrState
-  let missing = filter (`Set.notMember` cached) chunks
-  results <- liftIO $ mapM (awaitDownload odcTracer odrEnv odrPrefetch) missing
-  case sequence_ results of
-    Left _ -> return False
-    Right _ -> do
-      mapM_ (registerInCache cfg odrPrefetch odrState) missing
-      return True
+ensureChunks
+  OnDemandRuntime
+    { odrConfig = cfg@OnDemandConfig{odcTracer, odcRemote}
+    , odrManager
+    , odrState
+    , odrPrefetch
+    }
+  chunks = do
+    let env = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
+    cached <- odsCachedChunks <$> readTVarIO odrState
+    let missing = filter (`Set.notMember` cached) chunks
+    results <- liftIO $ mapM (awaitDownload odcTracer env odrPrefetch) missing
+    case sequence_ results of
+      Left _ -> return False
+      Right _ -> do
+        mapM_ (registerInCache cfg odrPrefetch odrState) missing
+        return True
 
 -- | Deletes the triad of files associated with a chunk.
 deleteChunkFiles :: IOLike m => HasFS m h -> ChunkNo -> m ()
