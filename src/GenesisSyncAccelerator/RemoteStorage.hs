@@ -1,3 +1,4 @@
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
@@ -24,6 +25,7 @@ module GenesisSyncAccelerator.RemoteStorage
   ) where
 
 import Control.Exception (SomeException, try)
+import Control.Monad.Catch (MonadThrow)
 import Data.Aeson (FromJSON (..), ToJSON (..), eitherDecode, object, withObject, (.:), (.=))
 import qualified Data.Bifunctor as Bifunctor
 import qualified Data.ByteString as BS
@@ -37,7 +39,7 @@ import GenesisSyncAccelerator.Tracing
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-import Network.HTTP.Client hiding (Manager, newManager)
+import Network.HTTP.Client hiding (Manager)
 import qualified Network.HTTP.Client as HTTP (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
@@ -55,31 +57,24 @@ data RemoteStorageConfig = RemoteStorageConfig
   }
   deriving (Eq, Show)
 
+-- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the env.
+-- Strips any trailing slashes from the URL.
+newRemoteStorageEnv :: String -> FilePath -> IO RemoteStorageEnv
+newRemoteStorageEnv url dir =
+  (\mgr -> RemoteStorageEnv{rseConfig = cfg, rseManager = mgr})
+    <$> HTTP.newManager tlsManagerSettings
+ where
+  cfg = RemoteStorageConfig{rscSrcUrl = dropTrailingSlashes url, rscDstDir = dir}
+  dropTrailingSlashes s
+    | not (null s) && last s == '/' = dropTrailingSlashes (init s)
+    | otherwise = s
+
 -- | Runtime environment for the remote storage client, pairing a 'RemoteStorageConfig'
--- with a shared HTTP 'Manager'. Use 'newRemoteStorageEnv' to construct.
+-- with a shared HTTP 'Manager'.
 data RemoteStorageEnv = RemoteStorageEnv
   { rseConfig :: RemoteStorageConfig
   , rseManager :: HTTP.Manager
   }
-
--- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the env.
--- Strips any trailing slashes from the URL.
-newRemoteStorageEnv :: String -> FilePath -> IO RemoteStorageEnv
-newRemoteStorageEnv url dir = do
-  manager <- HTTP.newManager tlsManagerSettings
-  return
-    RemoteStorageEnv
-      { rseConfig =
-          RemoteStorageConfig
-            { rscSrcUrl = dropTrailingSlashes url
-            , rscDstDir = dir
-            }
-      , rseManager = manager
-      }
- where
-  dropTrailingSlashes s
-    | not (null s) && last s == '/' = dropTrailingSlashes (init s)
-    | otherwise = s
 
 data RemoteTipInfo = RemoteTipInfo
   { rtiSlot :: Word64
@@ -110,23 +105,22 @@ downloadChunk ::
   ChunkNo ->
   IO (Either TraceDownloadFailure [FilePath])
 downloadChunk tracer env chunk = do
-  let cfg = rseConfig env
-  createDirectoryIfMissing True (rscDstDir cfg)
+  createDirectoryIfMissing True $ rscDstDir $ rseConfig env
   let fileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
-  sequence <$> mapM (downloadFile tracer (rseManager env) cfg chunk) fileTypes
+  sequence <$> mapM (downloadFile tracer env chunk) fileTypes
 
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
   RemoteStorageTracer IO ->
-  HTTP.Manager ->
-  RemoteStorageConfig ->
+  RemoteStorageEnv ->
   ChunkNo ->
   FileType ->
   IO (Either TraceDownloadFailure FilePath)
-downloadFile eventTracer manager cfg chunk fileType = do
-  let filename = Text.unpack $ getFileName fileType chunk
+downloadFile eventTracer env chunk fileType = do
+  let cfg = rseConfig env
+      manager = rseManager env
+      filename = Text.unpack $ getFileName fileType chunk
       localPath = rscDstDir cfg </> filename
-      failureTracer = contramap TraceDownloadFailure eventTracer
       processResponse r =
         case statusCode (responseStatus r) of
           200 -> do
@@ -134,31 +128,28 @@ downloadFile eventTracer manager cfg chunk fileType = do
             LBS.writeFile localPath body
             traceWith eventTracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
             pure $ Right localPath
-          status ->
-            let e = TraceDownloadError filename status
-             in traceWith failureTracer e >> pure (Left e)
-      traceEx :: SomeException -> IO (Either TraceDownloadFailure FilePath)
-      traceEx ex =
-        let e = TraceDownloadException filename $ show ex
-         in traceWith failureTracer e >> pure (Left e)
+          status -> traceFail $ TraceDownloadError filename status
+      traceFail f = traceWith (contramap TraceDownloadFailure eventTracer) f >> pure (Left f)
   -- Construct request
-  request <- parseRequest (rscSrcUrl cfg ++ "/" ++ filename)
+  request <- getRequest cfg filename
   -- Perform the download
   traceWith eventTracer $ TraceDownloadStart filename
-  try (httpLbs request manager) >>= either traceEx processResponse
+  (try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString)))
+    >>= either (traceFail . TraceDownloadException filename . show) processResponse
+
+getRequest :: MonadThrow m => RemoteStorageConfig -> String -> m Request
+getRequest cfg name = parseRequest (rscSrcUrl cfg ++ "/" ++ name)
 
 fetchTipInfo ::
   RemoteStorageTracer IO -> RemoteStorageEnv -> IO (Either TraceDownloadFailure RemoteTipInfo)
 fetchTipInfo tracer env = do
-  let cfg = rseConfig env
-      tipFileName = "tip.json"
-      tipUrl = rscSrcUrl cfg ++ "/" ++ tipFileName
+  request <- getRequest (rseConfig env) "tip.json"
+  let tipUrl = show $ getUri request
       processResponse r =
         case statusCode (responseStatus r) of
           200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
           status -> Left $ TraceDownloadError tipUrl status
   traceWith tracer $ TraceDownloadStart tipUrl
-  request <- parseRequest tipUrl
   result <-
     try (httpLbs request (rseManager env)) :: IO (Either SomeException (Response LBS.ByteString))
   return $ either (Left . TraceDownloadException tipUrl . show) processResponse result

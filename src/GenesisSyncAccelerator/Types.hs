@@ -1,12 +1,27 @@
-module GenesisSyncAccelerator.Types (HostAddr, StandardBlock, StandardTopLevelConfig) where
+module GenesisSyncAccelerator.Types
+  ( HostAddr
+  , MaxCachedChunksCount (..)
+  , PrefetchChunksCount (..)
+  , StandardBlock
+  , StandardTopLevelConfig
+  ) where
 
 import Data.Word (Word8)
+import Numeric.Natural
 import Ouroboros.Consensus.Cardano.Block (CardanoBlock)
 import Ouroboros.Consensus.Config (TopLevelConfig)
 import Ouroboros.Consensus.Protocol.TPraos (StandardCrypto)
 
 -- | A representation of a IPv4 address
 type HostAddr = (Word8, Word8, Word8, Word8)
+
+-- | Specification of maximum number of chunks to keep in cache
+newtype MaxCachedChunksCount = MaxCachedChunksCount Natural
+  deriving (Eq, Show)
+
+-- | How many chunks ahead of the current to fetch in advance
+newtype PrefetchChunksCount = PrefetchChunksCount Natural
+  deriving (Eq, Show)
 
 -- | The block type typically used across the codebase
 type StandardBlock = CardanoBlock StandardCrypto

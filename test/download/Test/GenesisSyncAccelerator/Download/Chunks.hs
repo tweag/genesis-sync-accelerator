@@ -4,7 +4,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Test.GenesisSyncAccelerator.Download (tests) where
+module Test.GenesisSyncAccelerator.Download.Chunks (tests) where
 
 import Control.Monad (filterM, foldM, forM_, unless)
 import Control.Monad.Catch (MonadMask)

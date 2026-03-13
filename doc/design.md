@@ -72,12 +72,11 @@ The GSA is:
 The accelerator must be fast enough to be chosen by the Devoted BlockFetch logic of the syncing
 node. That logic allows blocks to be downloaded from honest peers faster than they are validated,
 which can significantly speed up initial sync. If the GSA is too slow, the node may request blocks
-from another (real) node, thus defeating the purpose of the accelerator.
+from another (standard) node, thus defeating the purpose of the accelerator.
 
-It may happen e.g. if the connection between the GSA and the CDN is too slow. Indeed:
-
-- The accelerator does not store the chain locally ;
-- It does not (yet) implement any prefetching logic.
+It may happen, e.g., if the connection between the GSA and the CDN is too slow. Indeed, since the
+accelerator does not store the chain locally, it must fetch chunks from the CDN on demand,
+which may affect performance. Two measures are in place to mitigate this:
 
 ### Caching
 
@@ -90,11 +89,29 @@ positions in the chain are likely to thrash any practical cache size.
 
 ### Prefetching
 
-Currently, chunks are only downloaded from the CDN when they are actually needed ; this creates
-significant delays at chunk boundaries, and might trigger a node to disconnect from the accelerator
-and fetch blocks from another peer.
+The GSA can optionally download a configurable number of chunks ahead of the current
+position. This overlaps chunk fetching with serving, absorbing download latency that
+would otherwise stall the process at chunk boundaries.
 
-Prefetching is expected to be necessary for proper operation at scale and planned to be implemented.
+Without prefetching:
+
+```
+  serving:            |──  N  ──|         |── N+1 ──|         |── N+2 ──|
+  fetching: |──  N  ──|         |── N+1 ──|         |── N+2 ──|
+```
+
+With prefetching:
+
+```
+  serving:            |──  N  ──|── N+1 ──|── N+2 ──|
+  fetching: |──  N  ──|── N+1 ──|── N+2 ──|── N+3 ──|
+```
+
+Prefetching has interactions with cache: prefetched chunks are protected from cache
+eviction as long as they are within the prefetch window of at least one client.
+
+**NOTE:** While the necessity of prefetching has been theorized based on how the
+devoted `BlockFetch` logic works and certainly increases performance, there has not yet been opportunity to observe whether this can prevent the accelerator from being demoted.
 
 ## Deployment
 

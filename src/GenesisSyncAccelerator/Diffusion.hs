@@ -13,6 +13,7 @@ import GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..))
+import GenesisSyncAccelerator.Types (MaxCachedChunksCount, PrefetchChunksCount)
 import GenesisSyncAccelerator.Util (fpToHasFS)
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
@@ -84,13 +85,13 @@ run ::
   ) =>
   -- | Configuration for the Genesis Sync Accelerator (CDN fetching)
   RemoteStorage.RemoteStorageConfig ->
-  -- | Maximum number of chunks to keep in cache.
-  Int ->
+  MaxCachedChunksCount ->
+  PrefetchChunksCount ->
   Tracers IO blk ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run remoteCfg maxCachedChunks tracers sockAddr cfg = do
+run remoteCfg maxCachedChunks prefetchAhead tracers sockAddr cfg = do
   let cacheDir = RemoteStorage.rscDstDir remoteCfg
       hasFS = fpToHasFS cacheDir
   onDemand <-
@@ -103,6 +104,7 @@ run remoteCfg maxCachedChunks tracers sockAddr cfg = do
         , OnDemand.odcCodecConfig = codecCfg
         , OnDemand.odcCheckIntegrity = nodeCheckIntegrity storageCfg
         , OnDemand.odcMaxCachedChunks = maxCachedChunks
+        , OnDemand.odcPrefetchAhead = prefetchAhead
         }
   serve sockAddr $
     genesisSyncAccelerator

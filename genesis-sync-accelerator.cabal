@@ -61,6 +61,7 @@ executable genesis-sync-accelerator
     containers,
     contra-tracer,
     directory,
+    exceptions,
     filepath,
     fs-api,
     http-client,
@@ -129,6 +130,7 @@ library
     containers,
     contra-tracer,
     directory,
+    exceptions,
     filepath,
     fs-api,
     http-client,
@@ -217,7 +219,7 @@ test-suite download-tests
     warp,
 
   other-modules:
-    Test.GenesisSyncAccelerator.Download
+    Test.GenesisSyncAccelerator.Download.Chunks
     Test.GenesisSyncAccelerator.Download.RemoteTip
 
 test-suite on-demand-tests

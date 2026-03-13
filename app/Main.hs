@@ -13,7 +13,7 @@ import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..), startResourceTracer)
-import GenesisSyncAccelerator.Types (HostAddr)
+import GenesisSyncAccelerator.Types (HostAddr, MaxCachedChunksCount (..), PrefetchChunksCount (..))
 import GenesisSyncAccelerator.Util (getTopLevelConfig)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
@@ -34,6 +34,7 @@ main = withStdTerminalHandles $ do
     , remoteStorageCacheDir
     , remoteStorageSrcUrl
     , maxCachedChunks
+    , prefetchAhead
     } <-
     execParser optsParser
   let sockAddr = Socket.SockAddrInet port hostAddr
@@ -50,7 +51,7 @@ main = withStdTerminalHandles $ do
   cacheDir <- maybe (getXdgDirectory XdgCache "genesis-sync-accelerator") pure remoteStorageCacheDir
   pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
-  startResourceTracer stdoutTracer rtsFrequency
+  startResourceTracer stdoutTracer (unRTSFrequency rtsFrequency)
   remoteCfg <-
     maybe
       (throwIO MissingRemoteConfig)
@@ -60,11 +61,12 @@ main = withStdTerminalHandles $ do
     <$> Diffusion.run
       remoteCfg
       maxCachedChunks
+      prefetchAhead
       tracers
       sockAddr
       pInfoConfig
 
-type RTSFrequency = Int
+newtype RTSFrequency = RTSFrequency {unRTSFrequency :: Int}
 
 data MissingRemoteConfig = MissingRemoteConfig
   deriving Show
@@ -85,8 +87,10 @@ data Opts = Opts
   -- ^ Location of Sync Accelerator cache. 'Nothing' means use the XDG default ($XDG_CACHE_HOME/genesis-sync-accelerator), or $HOME/.cache/genesis-sync-accelerator if $XDG_CACHE_HOME is not set or empty.
   , remoteStorageSrcUrl :: Maybe String
   -- ^ Optional CDN URL for the Genesis Sync Accelerator.
-  , maxCachedChunks :: Int
+  , maxCachedChunks :: MaxCachedChunksCount
   -- ^ Maximum number of chunks to keep in cache.
+  , prefetchAhead :: PrefetchChunksCount
+  -- ^ Number of chunks to prefetch ahead of current position.
   }
 
 printHost :: (HostAddr, Socket.PortNumber) -> String
@@ -125,13 +129,16 @@ optsParser =
           , metavar "PATH"
           ]
     rtsFrequency <-
-      option auto $
-        mconcat
-          [ long "rts-frequency"
-          , help "Frequency (in milliseconds) to poll GHC RTS statistics"
-          , value 1000
-          , showDefault
-          ]
+      RTSFrequency
+        <$> option
+          auto
+          ( mconcat
+              [ long "rts-frequency"
+              , help "Frequency (in milliseconds) to poll GHC RTS statistics"
+              , value 1000
+              , showDefault
+              ]
+          )
     remoteStorageCacheDir <-
       optional $
         strOption $
@@ -151,13 +158,27 @@ optsParser =
             , metavar "URL"
             ]
     maxCachedChunks <-
-      option auto $
-        mconcat
-          [ long "max-cached-chunks"
-          , help "Maximum number of chunks to keep in cache"
-          , value 10
-          , showDefault
-          ]
+      MaxCachedChunksCount
+        <$> option
+          auto
+          ( mconcat
+              [ long "max-cached-chunks"
+              , help "Maximum number of chunks to keep in cache"
+              , value 10
+              , showDefault
+              ]
+          )
+    prefetchAhead <-
+      PrefetchChunksCount
+        <$> option
+          auto
+          ( mconcat
+              [ long "prefetch-ahead"
+              , help "Number of chunks to prefetch ahead of current position"
+              , value 3
+              , showDefault
+              ]
+          )
     pure
       Opts
         { addr
@@ -167,4 +188,5 @@ optsParser =
         , remoteStorageCacheDir
         , remoteStorageSrcUrl
         , maxCachedChunks
+        , prefetchAhead
         }
