@@ -366,15 +366,10 @@ mkOnDemandIterator
                           [c]
                       atomically $ writeTVar varCurrentIt (Just it)
                       next -- Transition to next chunk
-      hasNext =
-        readTVar varCurrentIt >>= \case
-          Just it -> iteratorHasNext it
-          Nothing -> return Nothing
+      hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
 
       close = do
-        readTVarIO varCurrentIt >>= \case
-          Just it -> iteratorClose it
-          Nothing -> return ()
+        readTVarIO varCurrentIt >>= maybe (return ()) iteratorClose
         -- Clean up: unpin the tracked prefetch window.
         cleanupOnError
 
