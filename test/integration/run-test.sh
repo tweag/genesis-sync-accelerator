@@ -183,7 +183,6 @@ jq --arg snap "$SCRIPT_DIR/config/peer-snapshot.json" \
    '.localRoots[0].accessPoints = [{"address": "127.0.0.1", "port": $port}]
    | .localRoots[0].trustable = true
    | .localRoots[0].valency = 1
-   | .bootstrapPeers = []
    | .peerSnapshotFile = $snap' \
    "$SCRIPT_DIR/config/topology.json" > "$CONSUMER_TOPOLOGY"
 
