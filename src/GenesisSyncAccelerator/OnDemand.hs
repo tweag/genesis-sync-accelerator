@@ -346,7 +346,7 @@ mkOnDemandIterator
                   -- Start background prefetches for uncached chunks in the window
                   cached <- odsCachedChunks <$> readTVarIO odrState
                   let uncached = filter (`Set.notMember` cached) newWindow
-                  liftIO $ prefetchChunks odcTracer odrEnv odrPrefetch uncached
+                  liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
 
                   ok <- ensureChunkAvailable c
                   if not ok
