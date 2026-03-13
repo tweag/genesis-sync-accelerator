@@ -51,7 +51,7 @@ main = withStdTerminalHandles $ do
   cacheDir <- maybe (getXdgDirectory XdgCache "genesis-sync-accelerator") pure remoteStorageCacheDir
   pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
-  startResourceTracer stdoutTracer rtsFrequency
+  startResourceTracer stdoutTracer (unRTSFrequency rtsFrequency)
   remoteCfg <-
     maybe
       (throwIO MissingRemoteConfig)
@@ -66,7 +66,7 @@ main = withStdTerminalHandles $ do
       sockAddr
       pInfoConfig
 
-type RTSFrequency = Int
+newtype RTSFrequency = RTSFrequency {unRTSFrequency :: Int}
 
 data MissingRemoteConfig = MissingRemoteConfig
   deriving Show
@@ -129,13 +129,16 @@ optsParser =
           , metavar "PATH"
           ]
     rtsFrequency <-
-      option auto $
-        mconcat
-          [ long "rts-frequency"
-          , help "Frequency (in milliseconds) to poll GHC RTS statistics"
-          , value 1000
-          , showDefault
-          ]
+      RTSFrequency
+        <$> option
+          auto
+          ( mconcat
+              [ long "rts-frequency"
+              , help "Frequency (in milliseconds) to poll GHC RTS statistics"
+              , value 1000
+              , showDefault
+              ]
+          )
     remoteStorageCacheDir <-
       optional $
         strOption $
