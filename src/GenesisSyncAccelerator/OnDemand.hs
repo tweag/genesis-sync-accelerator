@@ -102,7 +102,16 @@ import Ouroboros.Consensus.Util.IOLike
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
-import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
+import System.FS.API
+  ( Handle
+  , HasFS
+  , OpenMode (ReadMode)
+  , hClose
+  , hGetSize
+  , hOpen
+  , removeFile
+  , withFile
+  )
 import "contra-tracer" Control.Tracer (traceWith)
 
 -- | Configuration for on-demand fetching.
@@ -564,6 +573,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
           . applyStreamFrom chunkInfo from
           $ concat allEntries
   varEntries <- newTVarIO flatEntries
+  varCurrChunk <- newTVarIO (Nothing :: Maybe (ChunkNo, Handle h))
 
   -- 2. Define the 'iteratorNext' action.
   -- This action pops the next entry from the queue, opens the corresponding chunk file,
@@ -573,18 +583,34 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
           [] -> return IteratorExhausted
           ((chunk, WithBlockSize size entry) : rest) -> do
             atomically $ writeTVar varEntries rest
-            -- We open the file for every block. This is inefficient but safe.
-            -- Optimization: Keep the file handle open until the chunk changes.
-            res <- withFile hasFS (fsPathChunkFile chunk) ReadMode $ \hnd ->
-              extractBlockComponent
-                hasFS
-                chunkInfo
-                chunk
-                codecConfig
-                checkIntegrity
-                hnd
-                (WithBlockSize size entry)
-                component
+
+            handle <-
+              readTVarIO varCurrChunk >>= \case
+                Nothing -> do
+                  handle <- hOpen hasFS (fsPathChunkFile chunk) ReadMode
+                  atomically $ writeTVar varCurrChunk $ Just (chunk, handle)
+                  pure handle
+                Just (chunkNo, handle)
+                  | chunkNo == chunk -> pure handle
+                  | otherwise -> do
+                      hClose hasFS handle
+                      handle' <- hOpen hasFS (fsPathChunkFile chunk) ReadMode
+                      atomically $ writeTVar varCurrChunk $ Just (chunk, handle')
+                      pure handle'
+
+            res <-
+              onException
+                ( extractBlockComponent
+                    hasFS
+                    chunkInfo
+                    chunk
+                    codecConfig
+                    checkIntegrity
+                    handle
+                    (WithBlockSize size entry)
+                    component
+                )
+                (hClose hasFS handle)
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
@@ -596,9 +622,10 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
             return $ Just (tipToRealPoint chunkInfo entry)
 
       -- 4. Define the 'iteratorClose' action.
-      -- Since we don't keep persistent file handles (we open/close per block),
-      -- there is nothing to clean up here.
-      close = return ()
+      close = do
+        readTVarIO varCurrChunk >>= \case
+          Nothing -> pure ()
+          Just (_, handle) -> void (hClose hasFS handle)
 
   return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
 
