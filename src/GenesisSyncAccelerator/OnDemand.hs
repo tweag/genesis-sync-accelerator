@@ -593,7 +593,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
                 Just (chunkNo, handle)
                   | chunkNo == chunk -> pure handle
                   | otherwise -> do
-                      hClose hasFS handle
+                      closeHandle handle
                       handle' <- hOpen hasFS (fsPathChunkFile chunk) ReadMode
                       atomically $ writeTVar varCurrChunk $ Just (chunk, handle')
                       pure handle'
@@ -610,7 +610,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
                     (WithBlockSize size entry)
                     component
                 )
-                (hClose hasFS handle)
+                (closeHandle handle)
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
@@ -625,9 +625,14 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
       close = do
         readTVarIO varCurrChunk >>= \case
           Nothing -> pure ()
-          Just (_, handle) -> void (hClose hasFS handle)
+          Just (_, handle) -> closeHandle handle
 
   return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
+    where
+      -- | Reusable function to close the given handle
+      closeHandle :: Handle h -> m ()
+      closeHandle = hClose hasFS
+
 
 -- | Helper to convert an Index 'Entry' (which stores hash and slot/epoch)
 -- into a 'RealPoint' (which uses SlotNo).
