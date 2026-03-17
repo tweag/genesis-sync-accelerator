@@ -36,6 +36,7 @@ import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.List.NonEmpty as NE
 import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
 import qualified Data.Map.Strict as Map
@@ -247,7 +248,7 @@ mkOnDemandIterator ::
   BlockComponent blk b ->
   StreamFrom blk ->
   Maybe (StreamTo blk) ->
-  [ChunkNo] ->
+  NE.NonEmpty ChunkNo ->
   m (Iterator m blk b)
 mkOnDemandIterator
   OnDemandRuntime
@@ -269,7 +270,7 @@ mkOnDemandIterator
   from
   to
   chunks = do
-    varChunks <- newTVarIO chunks
+    varChunks <- newTVarIO $ NE.toList chunks
     varCurrentIt <- newTVarIO Nothing
     {-
      Track the current prefetch window in a TVar so that chunks can get unpinned:
@@ -354,8 +355,9 @@ mkOnDemandIterator
 
                   -- Start background prefetches for uncached chunks in the window
                   cached <- odsCachedChunks <$> readTVarIO odrState
-                  let uncached = filter (`Set.notMember` cached) newWindow
-                  liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
+                  case NE.nonEmpty $ filter (`Set.notMember` cached) newWindow of
+                    Nothing -> pure ()
+                    Just uncached -> liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
 
                   ok <- ensureChunkAvailable c
                   if not ok
@@ -372,7 +374,7 @@ mkOnDemandIterator
                           component
                           from
                           to
-                          [c]
+                          (NE.singleton c)
                       atomically $ writeTVar varCurrentIt (Just it)
                       next -- Transition to next chunk
       hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
@@ -432,7 +434,7 @@ prefetchChunks ::
   Remote.RemoteStorageTracer IO ->
   Remote.RemoteStorageEnv ->
   PrefetchState ->
-  [ChunkNo] ->
+  NE.NonEmpty ChunkNo ->
   IO ()
 prefetchChunks tracer env ps =
   mapM_ (startDownload tracer env ps)
@@ -472,7 +474,7 @@ registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCou
 ensureChunks ::
   (IOLike m, MonadIO m) =>
   OnDemandRuntime m blk h ->
-  [ChunkNo] ->
+  NE.NonEmpty ChunkNo ->
   m Bool
 ensureChunks
   OnDemandRuntime
@@ -484,7 +486,7 @@ ensureChunks
   chunks = do
     let env = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
     cached <- odsCachedChunks <$> readTVarIO odrState
-    let missing = filter (`Set.notMember` cached) chunks
+    let missing = NE.filter (`Set.notMember` cached) chunks
     results <- liftIO $ mapM (awaitDownload odcTracer env odrPrefetch) missing
     case sequence_ results of
       Left _ -> return False
@@ -502,17 +504,16 @@ deleteChunkFiles hasFS chunk = do
   hRemove h f = void $ try @_ @SomeException $ removeFile h f
 
 -- | Identifies the set of chunks covering a given streaming range.
-getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> [ChunkNo]
+getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> NE.NonEmpty ChunkNo
 getChunksInRange chunkInfo from to =
   let startChunk = chunkForFrom chunkInfo from
       endChunk = chunkForTo chunkInfo to
    in chunksBetween startChunk endChunk
  where
-  -- TODO: chunksBetween from ouroborous-consensus is incorrect, override locally to avoid this issue.
-  -- Remove this function when the fix is merged upstream.
-  -- See: https://github.com/tweag/genesis-sync-accelerator/issues/7
-  chunksBetween :: ChunkNo -> ChunkNo -> [ChunkNo]
-  chunksBetween (ChunkNo a) (ChunkNo b) = map ChunkNo $ if b < a then [b .. a] else [a .. b]
+  chunksBetween a'@(ChunkNo a) b'@(ChunkNo b) = 
+    case (if b < a then [b .. a] else [a .. b]) of 
+      [] -> error $ "Empty range: " ++ show a' ++ " --> " ++ show b'
+      (h:t) -> fmap ChunkNo $ h NE.:| t
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo
@@ -553,7 +554,7 @@ mkRawBlockIterator ::
   -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
   Maybe (StreamTo blk) ->
   -- | The list of chunks (epochs) to iterate over.
-  [ChunkNo] ->
+  NE.NonEmpty ChunkNo ->
   m (Iterator m blk b)
 mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
   -- 1. Read all entries from all requested chunks.
@@ -638,8 +639,8 @@ tipToRealPoint :: ChunkInfo -> Entry blk -> RealPoint blk
 tipToRealPoint ci Secondary.Entry{blockOrEBB, headerHash} =
   RealPoint (ChunkLayout.slotNoOfBlockOrEBB ci blockOrEBB) headerHash
 
-chunksFrom :: ChunkInfo -> StreamFrom blk -> [ChunkNo]
-chunksFrom ci from = iterate nextChunk (chunkForFrom ci from)
+chunksFrom :: ChunkInfo -> StreamFrom blk -> NE.NonEmpty ChunkNo
+chunksFrom ci from = NE.iterate nextChunk (chunkForFrom ci from)
  where
   nextChunk (ChunkNo n) = ChunkNo (n + 1)
 
