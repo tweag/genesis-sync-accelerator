@@ -94,6 +94,7 @@ import Ouroboros.Consensus.Util.IOLike
   , SomeException
   , StrictTVar
   , atomically
+  , bracketOnError
   , newTVarIO
   , onException
   , readTVar
@@ -586,17 +587,22 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
 
             handle <-
               readTVarIO varCurrChunk >>= \case
-                Nothing -> do
-                  handle <- hOpen hasFS (fsPathChunkFile chunk) ReadMode
-                  atomically $ writeTVar varCurrChunk $ Just (chunk, handle)
-                  pure handle
-                Just (chunkNo, handle)
-                  | chunkNo == chunk -> pure handle
-                  | otherwise -> do
-                      closeHandle handle
-                      handle' <- hOpen hasFS (fsPathChunkFile chunk) ReadMode
-                      atomically $ writeTVar varCurrChunk $ Just (chunk, handle')
-                      pure handle'
+                Nothing ->
+                  bracketOnError
+                    (hOpen hasFS (fsPathChunkFile chunk) ReadMode)
+                    closeHandle
+                    (\h -> h <$ atomically (writeTVar varCurrChunk (Just (chunk, h))))
+                Just (chunkNo, h)
+                  | chunkNo == chunk -> pure h
+                  | otherwise ->
+                      bracketOnError
+                        (hOpen hasFS (fsPathChunkFile chunk) ReadMode)
+                        closeHandle
+                        ( \h' -> do
+                            closeHandle h
+                            atomically $ writeTVar varCurrChunk $ Just (chunk, h')
+                            pure h'
+                        )
 
             res <-
               onException
@@ -610,7 +616,10 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
                     (WithBlockSize size entry)
                     component
                 )
-                (closeHandle handle)
+                ( do
+                    atomically $ writeTVar varCurrChunk Nothing
+                    closeHandle handle
+                )
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
@@ -628,11 +637,10 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
           Just (_, handle) -> closeHandle handle
 
   return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
-    where
-      -- | Reusable function to close the given handle
-      closeHandle :: Handle h -> m ()
-      closeHandle = hClose hasFS
-
+ where
+  -- \| Reusable function to close the given handle
+  closeHandle :: Handle h -> m ()
+  closeHandle = hClose hasFS
 
 -- | Helper to convert an Index 'Entry' (which stores hash and slot/epoch)
 -- into a 'RealPoint' (which uses SlotNo).
