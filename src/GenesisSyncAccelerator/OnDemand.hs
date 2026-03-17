@@ -28,7 +28,6 @@ module GenesisSyncAccelerator.OnDemand
   , onDemandIteratorForRange
   , onDemandIteratorFrom
   , readOnDemandTip
-  , tipFromRemote
   ) where
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
