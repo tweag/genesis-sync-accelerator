@@ -89,7 +89,7 @@ test_ensureChunksLRU = do
             assertEqual ("Chunk " ++ show n ++ " file " ++ fn ++ " present") True exists
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
-withTemp = Temp.withSystemTempDirectory "on-demand-test"
+withTemp = Temp.withSystemTempDirectory "ensure-chunks-test"
 
 tests :: TestTree
 tests =

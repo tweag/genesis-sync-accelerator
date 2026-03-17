@@ -215,7 +215,7 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
 ----------------------------- Helper functions and types -----------------------------
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
-withTemp = Temp.withSystemTempDirectory "download-test"
+withTemp = Temp.withSystemTempDirectory "chunks-test"
 
 -- Trace values of given type to given file by appending the 'show' representation with a newline.
 tracerToFile :: Show a => FilePath -> Tracer IO a
