@@ -41,19 +41,19 @@ initS3 cfg = do
   let region = Amazonka.Region' (ucS3Region cfg)
       env1 = env0{Amazonka.region = region}
   env2 <- case ucS3Endpoint cfg of
-        Nothing -> pure env1
-        Just ep -> do
-          (useTLS, host, port) <- parseEndpoint ep
-          let svc =
-                Amazonka.setEndpoint
-                  useTLS
-                  host
-                  port
-                  S3.defaultService
-              -- AWS S3 buckets rely on wildcard DNS resolution (<bucket-name>.s3.<region>.amazonaws.com),
-              -- which doesn't work with custom endpoints (R2, MinIO). Use path-style addressing instead.
-              svc' = svc{Amazonka.s3AddressingStyle = Amazonka.S3AddressingStylePath}
-           in pure $ Amazonka.configureService svc' env1
+    Nothing -> pure env1
+    Just ep -> do
+      (useTLS, host, port) <- parseEndpoint ep
+      let svc =
+            Amazonka.setEndpoint
+              useTLS
+              host
+              port
+              S3.defaultService
+          -- AWS S3 buckets rely on wildcard DNS resolution (<bucket-name>.s3.<region>.amazonaws.com),
+          -- which doesn't work with custom endpoints (R2, MinIO). Use path-style addressing instead.
+          svc' = svc{Amazonka.s3AddressingStyle = Amazonka.S3AddressingStylePath}
+       in pure $ Amazonka.configureService svc' env1
   pure
     S3Handle
       { s3Env = env2
@@ -80,7 +80,10 @@ parseEndpoint url = do
   req <- parseRequest (T.unpack url)
   let path = HTTP.path req
   if path /= "/" && path /= ""
-    then fail $ "Endpoint URL must not contain a path (Amazonka's setEndpoint does not support path prefixes), got: " <> T.unpack url
+    then
+      fail $
+        "Endpoint URL must not contain a path (Amazonka's setEndpoint does not support path prefixes), got: "
+          <> T.unpack url
     else
       pure
         ( HTTP.secure req

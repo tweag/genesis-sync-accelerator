@@ -62,7 +62,8 @@ optsParser = do
         <$> strOption
           ( long "s3-endpoint"
               <> metavar "URL"
-              <> help "Custom S3 endpoint URL as scheme://host[:port] (for Cloudflare R2, MinIO, etc.). Path components are not supported because Amazonka's setEndpoint only accepts host and port."
+              <> help
+                "Custom S3 endpoint URL as scheme://host[:port] (for Cloudflare R2, MinIO, etc.). Path components are not supported because Amazonka's setEndpoint only accepts host and port."
           )
   ucS3Region <-
     T.pack
