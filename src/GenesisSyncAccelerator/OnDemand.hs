@@ -348,7 +348,6 @@ mkOnDemandIterator
               [] -> return IteratorExhausted
               (c : rest) -> do
                 atomically $ writeTVar varChunks rest
-
                 flip onException cleanupOnError $ do
                   -- Compute and set new active prefetch window.
                   let newWindow = c : genericTake numPrefetch rest
@@ -366,7 +365,7 @@ mkOnDemandIterator
                       return IteratorExhausted
                     else do
                       it <-
-                        mkRawChunkIterator
+                        mkRawBlockIterator
                           odcHasFS
                           odcChunkInfo
                           odcCodecConfig
@@ -532,7 +531,7 @@ chunkForTo ci (StreamToInclusive pt) = ChunkLayout.chunkIndexOfSlot ci (realPoin
 -- This iterator is "stateless" in the sense that it does not rely on the global
 -- 'ImmutableDB' state (tip, indices, etc.). Instead, it directly parses the
 -- secondary index files on disk to find the requested blocks.
-mkRawChunkIterator ::
+mkRawBlockIterator ::
   forall m blk b h.
   ( IOLike m
   , MonadIO m
@@ -557,7 +556,7 @@ mkRawChunkIterator ::
   -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
+mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
@@ -574,11 +573,13 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
           . applyStreamFrom chunkInfo from
           $ concat allEntries
   varEntries <- newTVarIO flatEntries
-  varCurrChunk <- newTVarIO (Nothing :: Maybe (ChunkNo, Handle h))
+  varHandle <- newTVarIO (Nothing :: Maybe (Handle h))
 
   -- 2. Define the 'iteratorNext' action.
   -- This action pops the next entry from the queue, opens the corresponding chunk file,
   -- reads the block data, and extracts the requested component.
+  -- Since this iterator always serves a single chunk, the handle is opened once on the
+  -- first call and reused for all subsequent blocks.
   let next =
         readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
@@ -586,23 +587,13 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
             atomically $ writeTVar varEntries rest
 
             handle <-
-              readTVarIO varCurrChunk >>= \case
+              readTVarIO varHandle >>= \case
+                Just h -> pure h
                 Nothing ->
                   bracketOnError
                     (hOpen hasFS (fsPathChunkFile chunk) ReadMode)
                     closeHandle
-                    (\h -> h <$ atomically (writeTVar varCurrChunk (Just (chunk, h))))
-                Just (chunkNo, h)
-                  | chunkNo == chunk -> pure h
-                  | otherwise ->
-                      bracketOnError
-                        (hOpen hasFS (fsPathChunkFile chunk) ReadMode)
-                        closeHandle
-                        ( \h' -> do
-                            closeHandle h
-                            atomically $ writeTVar varCurrChunk $ Just (chunk, h')
-                            pure h'
-                        )
+                    (\h -> h <$ atomically (writeTVar varHandle (Just h)))
 
             res <-
               onException
@@ -617,7 +608,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
                     component
                 )
                 ( do
-                    atomically $ writeTVar varCurrChunk Nothing
+                    atomically $ writeTVar varHandle Nothing
                     closeHandle handle
                 )
             return $ IteratorResult res
@@ -631,10 +622,10 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
             return $ Just (tipToRealPoint chunkInfo entry)
 
       -- 4. Define the 'iteratorClose' action.
-      close = do
-        readTVarIO varCurrChunk >>= \case
+      close =
+        readTVarIO varHandle >>= \case
           Nothing -> pure ()
-          Just (_, handle) -> closeHandle handle
+          Just handle -> closeHandle handle
 
   return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
  where
