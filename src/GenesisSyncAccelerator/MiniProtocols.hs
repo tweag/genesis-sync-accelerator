@@ -19,7 +19,6 @@ module GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator) where
 
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
-import Control.Monad (forever)
 import Control.Monad.IO.Class (MonadIO)
 import Control.ResourceRegistry
 import Data.ByteString.Lazy (ByteString)
@@ -300,7 +299,7 @@ blockFetchServer tracer onDemand blockComponent _registry =
       }
 
 sleepForever :: IOLike m => m a
-sleepForever = forever $ threadDelay 10
+sleepForever = atomically retry
 
 data ImmDBServerException
   = ReachedImmutableTip
