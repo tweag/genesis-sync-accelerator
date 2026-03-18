@@ -37,6 +37,7 @@ import Test.GenesisSyncAccelerator.Utilities
   , currentFileTypes
   , genSeveralChunkNumbers
   , getCurrentFilenamesForChunk
+  , tracerToFile
   )
 import Test.QuickCheck
 import Test.QuickCheck.Instances ()
@@ -216,10 +217,6 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "chunks-test"
-
--- Trace values of given type to given file by appending the 'show' representation with a newline.
-tracerToFile :: Show a => FilePath -> Tracer IO a
-tracerToFile f = Tracer (\a -> appendFile f (show a ++ "\n"))
 
 getTmpfileContent :: ConnectionSide -> String
 getTmpfileContent = ("file on " ++) . show

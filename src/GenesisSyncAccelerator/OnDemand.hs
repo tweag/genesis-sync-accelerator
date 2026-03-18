@@ -36,9 +36,9 @@ import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.List.NonEmpty as NEL
 import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
+import qualified Data.List.NonEmpty as NEL
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
@@ -510,10 +510,10 @@ getChunksInRange chunkInfo from to =
       endChunk = chunkForTo chunkInfo to
    in chunksBetween startChunk endChunk
  where
-  chunksBetween a'@(ChunkNo a) b'@(ChunkNo b) = 
-    case (if b < a then [b .. a] else [a .. b]) of 
+  chunksBetween a'@(ChunkNo a) b'@(ChunkNo b) =
+    case (if b < a then [b .. a] else [a .. b]) of
       [] -> error $ "Empty range: " ++ show a' ++ " --> " ++ show b'
-      (h:t) -> fmap ChunkNo $ h NEL.:| t
+      (h : t) -> fmap ChunkNo $ h NEL.:| t
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo

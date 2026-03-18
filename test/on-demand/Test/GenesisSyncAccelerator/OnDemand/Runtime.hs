@@ -25,14 +25,9 @@ import GenesisSyncAccelerator.OnDemand
   , readOnDemandTip
   )
 import GenesisSyncAccelerator.RemoteStorage (RemoteTipInfo (..))
-import GenesisSyncAccelerator.Types
-  ( MaxCachedChunksCount (..)
-  , PrefetchChunksCount (..)
-  , StandardBlock
-  )
+import GenesisSyncAccelerator.Types (StandardBlock)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (testWithApplication)
-import Numeric.Natural
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , ConvertRawHash (fromRawHash, toRawHash)
@@ -48,22 +43,18 @@ import Paths_genesis_sync_accelerator (getDataFileName)
 import System.FS.IO (HandleIO)
 import System.FilePath (takeDirectory, (</>))
 import qualified System.IO.Temp as Temp
+import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
-import Test.GenesisSyncAccelerator.Utilities (mkFullConfig, topLevelConfigFileRelativePath)
+import Test.GenesisSyncAccelerator.Utilities
+  ( ioQuickly
+  , mkFullConfig
+  , topLevelConfigFileRelativePath
+  )
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
 
 ----------------------------- Generators and properties -----------------------------
-instance Arbitrary ChunkInfo where
-  arbitrary = do UniformChunkSize <$> arbitrary
-
-instance Arbitrary ChunkSize where
-  arbitrary = do
-    n <- choose (1, 100)
-    p <- arbitrary
-    return $ ChunkSize{numRegularBlocks = n, chunkCanContainEBB = p}
-
 instance Arbitrary (OneEraHash (CardanoEras StandardCrypto)) where
   arbitrary = do
     bytes <- BS.pack <$> vectorOf 32 arbitrary
@@ -80,9 +71,6 @@ instance Arbitrary RemoteTipInfo where
         , rtiBlockNo = blockNo
         , rtiHashBytes = toRawHash (Proxy @(CardanoBlock StandardCrypto)) hash
         }
-
-genNat :: Int -> Int -> Gen Natural
-genNat low high = fromIntegral <$> choose (low, high)
 
 prop_newOnDemandRuntimeContainsConfigInfoAsGiven :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeContainsConfigInfoAsGiven partialConfig@PartialOnDemandConfig{..} =
@@ -182,26 +170,6 @@ checkFromConfig partialConfig mkProp =
       \port -> do
         config <- mkFullConfig partialConfig (ConfigFile configFile) tmpdir port
         mkProp config
-
-instance Arbitrary PartialOnDemandConfig where
-  arbitrary = do
-    chunkInfo <- arbitrary
-    integrity <- arbitrary
-    maxChunks <- MaxCachedChunksCount <$> genNat 0 10
-    numPrefetch <- PrefetchChunksCount <$> genNat 0 10
-    return
-      PartialOnDemandConfig
-        { podcChunkInfo = chunkInfo
-        , podcIntegrityConstant = integrity
-        , podcMaxCachedChunks = maxChunks
-        , podcPrefetchAhead = numPrefetch
-        }
-
-quickly :: forall prop. Testable prop => prop -> Property
-quickly = withMaxSuccess 5
-
-ioQuickly :: forall prop. Testable prop => IO prop -> Property
-ioQuickly = quickly . ioProperty
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "on-demand-runtime-test"

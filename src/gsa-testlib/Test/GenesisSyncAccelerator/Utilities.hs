@@ -1,3 +1,4 @@
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -8,8 +9,10 @@ module Test.GenesisSyncAccelerator.Utilities
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
   , getCurrentFilenamesForChunk
+  , ioQuickly
   , mkFullConfig
   , topLevelConfigFileRelativePath
+  , tracerToFile
   ) where
 
 import qualified Data.Text as Text
@@ -23,7 +26,7 @@ import System.FS.IO (HandleIO)
 import System.FilePath ((</>))
 import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
 import Test.QuickCheck
-import "contra-tracer" Control.Tracer (nullTracer)
+import "contra-tracer" Control.Tracer (Tracer (..), nullTracer)
 
 -- | An exhaustive list of all file types possibly associated with a chunk.
 allFileTypes :: [FileType]
@@ -52,6 +55,12 @@ getCurrentFilenamesForChunk cn = getFilenamesForChunk cn currentFileTypes
 getFilenamesForChunk :: ChunkNo -> [FileType] -> [String]
 getFilenamesForChunk cn = map (\ft -> Text.unpack $ getFileName ft cn)
 
+ioQuickN :: forall prop. Testable prop => Int -> IO prop -> Property
+ioQuickN n = withMaxSuccess n . ioProperty
+
+ioQuickly :: forall prop. Testable prop => IO prop -> Property
+ioQuickly = ioQuickN 5
+
 mkFullConfig ::
   PartialOnDemandConfig ->
   ConfigFile ->
@@ -74,3 +83,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
 
 topLevelConfigFileRelativePath :: FilePath
 topLevelConfigFileRelativePath = "test" </> "data" </> "config" </> "config.json"
+
+-- Trace values of given type to given file by appending the 'show' representation with a newline.
+tracerToFile :: Show a => FilePath -> Tracer IO a
+tracerToFile f = Tracer (\a -> appendFile f (show a ++ "\n"))
