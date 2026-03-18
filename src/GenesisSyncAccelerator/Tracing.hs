@@ -60,6 +60,8 @@ data TraceRemoteStorageEvent
     TraceDownloadFailure TraceDownloadFailure
   | -- | Starting download of tip metadata.
     TraceTipFetchStart !String
+  | -- | Successfully fetched tip metadata.
+    TraceTipFetchSuccess !String
   deriving (Eq, Show)
 
 -- | Download failure reasons.

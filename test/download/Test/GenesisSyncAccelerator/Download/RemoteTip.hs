@@ -42,10 +42,14 @@ test_fetchTipInfo_parses_json = do
     assertEqual "Fetched tip info matches served JSON" (Right tipInfo) result
 
     events <- readIORef eventsRef
-    let isDownloadStart = \case
-          TraceDownloadStart url -> "tip.json" `List.isSuffixOf` url
+    let isTipFetchStart = \case
+          TraceTipFetchStart url -> "tip.json" `List.isSuffixOf` url
           _ -> False
-    assertEqual "TraceDownloadStart emitted for tip.json" True (any isDownloadStart events)
+        isTipFetchSuccess = \case
+          TraceTipFetchSuccess url -> "tip.json" `List.isSuffixOf` url
+          _ -> False
+    assertEqual "TraceTipFetchStart emitted for tip.json" True (any isTipFetchStart events)
+    assertEqual "TraceTipFetchSuccess emitted for tip.json" True (any isTipFetchSuccess events)
 
 ----------------------------- Test aggregation -----------------------------
 
