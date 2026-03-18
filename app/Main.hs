@@ -5,10 +5,8 @@
 module Main (main) where
 
 import Cardano.Crypto.Init (cryptoInit)
-import Control.Monad.Class.MonadThrow (throwIO)
 import Data.List (intercalate)
 import Data.Void
-import GHC.Exception.Type (Exception)
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
@@ -52,11 +50,7 @@ main = withStdTerminalHandles $ do
   pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer (unRTSFrequency rtsFrequency)
-  remoteCfg <-
-    maybe
-      (throwIO MissingRemoteConfig)
-      (pure . (`RemoteStorage.RemoteStorageConfig` cacheDir))
-      remoteStorageSrcUrl
+  let remoteCfg = RemoteStorage.RemoteStorageConfig remoteStorageSrcUrl cacheDir
   absurd
     <$> Diffusion.run
       remoteCfg
@@ -67,11 +61,6 @@ main = withStdTerminalHandles $ do
       pInfoConfig
 
 newtype RTSFrequency = RTSFrequency {unRTSFrequency :: Int}
-
-data MissingRemoteConfig = MissingRemoteConfig
-  deriving Show
-
-instance Exception MissingRemoteConfig
 
 -- | Command-line options for the Genesis Sync Accelerator.
 data Opts = Opts
@@ -85,8 +74,8 @@ data Opts = Opts
   -- ^ Frequency for tracing RTS statistics.
   , remoteStorageCacheDir :: Maybe FilePath
   -- ^ Location of Sync Accelerator cache. 'Nothing' means use the XDG default ($XDG_CACHE_HOME/genesis-sync-accelerator), or $HOME/.cache/genesis-sync-accelerator if $XDG_CACHE_HOME is not set or empty.
-  , remoteStorageSrcUrl :: Maybe String
-  -- ^ Optional CDN URL for the Genesis Sync Accelerator.
+  , remoteStorageSrcUrl :: String
+  -- ^ CDN URL for the Genesis Sync Accelerator.
   , maxCachedChunks :: MaxCachedChunksCount
   -- ^ Maximum number of chunks to keep in cache.
   , prefetchAhead :: PrefetchChunksCount
@@ -149,14 +138,13 @@ optsParser =
             , metavar "PATH"
             ]
     remoteStorageSrcUrl <-
-      optional $
-        strOption $
-          mconcat
-            [ long "rs-src-url"
-            , help
-                "URL to a CDN serving ImmutableDB chunks (e.g. https://example.com/chain). If left empty, the sync accelerator is disabled."
-            , metavar "URL"
-            ]
+      strOption $
+        mconcat
+          [ long "rs-src-url"
+          , help
+              "URL to a CDN serving ImmutableDB chunks (e.g. https://example.com/chain)"
+          , metavar "URL"
+          ]
     maxCachedChunks <-
       MaxCachedChunksCount
         <$> option
