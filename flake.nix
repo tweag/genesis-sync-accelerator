@@ -73,6 +73,8 @@
               pkgs.hsPkgs.hsPkgs.chunk-uploader.components.exes.chunk-uploader
               pkgs.hsPkgs.hsPkgs.cardano-node.components.exes.cardano-node
               pkgs.hsPkgs.hsPkgs.ouroboros-consensus-cardano.components.exes.db-analyser
+              pkgs.minio
+              pkgs.minio-client
               pkgs.python3
               pkgs.curl
               pkgs.jq
