@@ -5,7 +5,7 @@ This project is among a number of [Tweag's Cardano projects](https://tweag.githu
 
 ## Documentation
 
-- [Using a Genesis Sync Accelerator](./using-an-accelerator.md)
+- [Using a Genesis Sync Accelerator](./doc/using-an-accelerator.md)
 - [Design](./doc/design.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Code of Conduct](./CODE-OF-CONDUCT.md)
