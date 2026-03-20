@@ -169,6 +169,8 @@ library gsa-testlib
     genesis-sync-accelerator,
     ouroboros-consensus,
     text,
+    wai-app-static,
+    warp,
 
   other-modules:
     Paths_genesis_sync_accelerator
@@ -222,7 +224,6 @@ test-suite download-tests
     temporary,
     text,
     wai,
-    wai-app-static,
     warp,
 
   other-modules:
@@ -253,8 +254,6 @@ test-suite on-demand-tests
     tasty-quickcheck,
     temporary,
     text,
-    wai-app-static,
-    warp,
 
   other-modules:
     Test.GenesisSyncAccelerator.OnDemand.Runtime

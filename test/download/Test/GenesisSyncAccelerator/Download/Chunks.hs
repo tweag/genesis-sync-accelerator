@@ -6,7 +6,7 @@
 
 module Test.GenesisSyncAccelerator.Download.Chunks (tests) where
 
-import Control.Monad (filterM, foldM, forM_, unless)
+import Control.Monad (filterM, foldM, unless)
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
 import qualified Data.List as List
@@ -23,8 +23,6 @@ import GenesisSyncAccelerator.RemoteStorage
   , getFileName
   , newRemoteStorageEnv
   )
-import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
-import Network.Wai.Handler.Warp (testWithApplication)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
   ( ChunkNo (..)
   )
@@ -32,11 +30,13 @@ import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
+import Test.GenesisSyncAccelerator.Types (ClientFolder (..), ServerFolder (..))
 import Test.GenesisSyncAccelerator.Utilities
   ( allFileTypes
   , currentFileTypes
   , genSeveralChunkNumbers
   , getCurrentFilenamesForChunk
+  , testWithFileServer
   , tracerToFile
   )
 import Test.QuickCheck
@@ -58,12 +58,12 @@ prop_downloadChunk_downloads_files_as_expected_when_available =
         -- Establish the files on the server side, and check the precondition that no file is
         -- already present on the client side.
         setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
-        initialTargetFolderContents <- listDirectory clientTmpdir
+        initialTargetFolderContents <- listDirectory $ unClientFolder clientTmpdir
         case initialTargetFolderContents of
           -- No file should yet be present in the target folder.
           [] -> do
             unsafeDownloadChunk nullTracer setup targetChunk
-            posthocTargetFolderContents <- listDirectory clientTmpdir
+            posthocTargetFolderContents <- listDirectory $ unClientFolder clientTmpdir
             -- After the download, each of the current file types should be represented for the
             -- target chunk by a file; there should be no other content in the target folder.
             pure $ List.sort posthocTargetFolderContents === List.sort (getCurrentFilenamesForChunk targetChunk)
@@ -92,7 +92,7 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
             let logfile = tmp </> "log.txt"
                 tracer = tracerToFile logfile
             setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
-            initialTargetFolderContents <- listDirectory clientTmpdir
+            initialTargetFolderContents <- listDirectory $ unClientFolder clientTmpdir
             case initialTargetFolderContents of
               [] -> do
                 -- Precondition passes; call the function under test then check that
@@ -135,8 +135,8 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
      in ioProperty $
           withTemp $ \tmp -> do
             setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
-            preDownloadClientSideFileNames <- List.sort <$> listDirectory clientTmpdir
-            preDownloadServerSideFileNames <- listDirectory serverTmpdir
+            preDownloadClientSideFileNames <- List.sort <$> listDirectory (unClientFolder clientTmpdir)
+            preDownloadServerSideFileNames <- listDirectory (unServerFolder serverTmpdir)
             unless
               (preDownloadClientSideFileNames == List.sort (Map.elems expectedPreDownloadFileNames))
               $ error
@@ -147,13 +147,15 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
                 ++ ")"
             preDownloadContentErrors <-
               catMaybes
-                <$> mapM (\fn -> hasContent ClientSide $ clientTmpdir </> fn) preDownloadClientSideFileNames
+                <$> mapM
+                  (\fn -> hasContent ClientSide $ unClientFolder clientTmpdir </> fn)
+                  preDownloadClientSideFileNames
             case preDownloadContentErrors of
               [] -> do
                 -- Run the function under test, then check that the list of files present
                 -- in the target folder is exactly as expected.
                 unsafeDownloadChunk nullTracer setup targetChunk
-                filesAfterDownload <- List.sort <$> listDirectory clientTmpdir
+                filesAfterDownload <- List.sort <$> listDirectory (unClientFolder clientTmpdir)
                 if filesAfterDownload /= allTargetChunkFileNames
                   then
                     pure $
@@ -172,10 +174,10 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
                     let (expDynamic, expStatic) = List.partition (`elem` preDownloadServerSideFileNames) filesAfterDownload
                     errorsFromExpectationOfStasis <-
                       catMaybes
-                        <$> mapM (\fn -> hasContent ClientSide $ clientTmpdir </> fn) expStatic
+                        <$> mapM (\fn -> hasContent ClientSide $ unClientFolder clientTmpdir </> fn) expStatic
                     errorsFromExpectationOfDownload <-
                       catMaybes
-                        <$> mapM (\fn -> hasContent ServerSide $ clientTmpdir </> fn) expDynamic
+                        <$> mapM (\fn -> hasContent ServerSide $ unClientFolder clientTmpdir </> fn) expDynamic
                     pure $ case errorsFromExpectationOfStasis ++ errorsFromExpectationOfDownload of
                       [] -> property True
                       errors ->
@@ -235,10 +237,9 @@ unsafeDownloadChunk ::
   ChunkNo ->
   IO ()
 unsafeDownloadChunk tracer TestFolderSetup{..} targetChunk =
-  testWithApplication (pure $ staticApp $ defaultFileServerSettings serverTmpdir) $
-    \port -> do
-      storageEnv <- newRemoteStorageEnv ("http://localhost:" ++ show port) clientTmpdir
-      either (error . show) (const ()) <$> downloadChunk tracer storageEnv targetChunk
+  testWithFileServer serverTmpdir $ \port -> do
+    storageEnv <- newRemoteStorageEnv ("http://localhost:" ++ show port) (unClientFolder clientTmpdir)
+    either (error . show) (const ()) <$> downloadChunk tracer storageEnv targetChunk
 
 -- Within the given folder, create the filepaths specified by the given "kernel"s.
 setupFilesAndFolders :: FilePath -> [FileKernel] -> IO TestFolderSetup
@@ -246,9 +247,10 @@ setupFilesAndFolders tmpRoot fileKernels = do
   let getFolder side = tmpRoot </> show side
       mkfile :: FileKernel -> IO FilePath
       mkfile (s, t, c) = let fp = getFolder s </> nameFile t c in writeFile fp (getTmpfileContent s) >> pure fp
-      serverTmpdir = getFolder ServerSide
-      clientTmpdir = getFolder ClientSide
-  forM_ [serverTmpdir, clientTmpdir] (False `createDirectoryIfMissing`)
+      serverTmpdir = ServerFolder $ getFolder ServerSide
+      clientTmpdir = ClientFolder $ getFolder ClientSide
+  createDirectoryIfMissing False $ unServerFolder serverTmpdir
+  createDirectoryIfMissing False $ unClientFolder clientTmpdir
   filepaths <- foldM (\acc k -> (: acc) <$> mkfile k) [] fileKernels
   missingFiles <- filterM (fmap not . doesFileExist) filepaths
   case missingFiles of
@@ -256,15 +258,15 @@ setupFilesAndFolders tmpRoot fileKernels = do
     missing -> error $ "Not all files to create have been created; missing: " ++ show missing
   return $ TestFolderSetup{serverTmpdir = serverTmpdir, clientTmpdir = clientTmpdir}
 
--- Either the server or client side of a connection over which files are donwnloaded.
+-- Either the server or client side of a connection over which files are downloaded.
 data ConnectionSide = ServerSide | ClientSide deriving (Show, Eq, Ord)
 
 -- Determines subfolder within a temporary directory, and file name.
 type FileKernel = (ConnectionSide, FileType, ChunkNo)
 
 data TestFolderSetup = TestFolderSetup
-  { serverTmpdir :: FilePath
-  , clientTmpdir :: FilePath
+  { serverTmpdir :: ServerFolder
+  , clientTmpdir :: ClientFolder
   }
   deriving (Show, Eq)
 

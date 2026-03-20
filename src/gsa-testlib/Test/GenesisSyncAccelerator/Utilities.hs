@@ -9,9 +9,10 @@ module Test.GenesisSyncAccelerator.Utilities
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
   , getCurrentFilenamesForChunk
+  , getTopLevelConfigFilePath
   , ioQuickly
   , mkFullConfig
-  , getTopLevelConfigFilePath
+  , testWithFileServer
   , tracerToFile
   ) where
 
@@ -20,12 +21,19 @@ import GenesisSyncAccelerator.OnDemand (OnDemandConfig (..))
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
 import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
+import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
+import Network.Wai.Handler.Warp (Port, testWithApplication)
 import Ouroboros.Consensus.Config (configCodec)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import Paths_genesis_sync_accelerator (getDataFileName)
 import System.FS.IO (HandleIO)
 import System.FilePath ((</>))
-import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
+import Test.GenesisSyncAccelerator.Types
+  ( ConfigFile (..)
+  , PartialOnDemandConfig (..)
+  , ServerFolder (..)
+  , TmpDir (..)
+  )
 import Test.QuickCheck
 import "contra-tracer" Control.Tracer (Tracer (..), nullTracer)
 
@@ -56,6 +64,9 @@ getCurrentFilenamesForChunk cn = getFilenamesForChunk cn currentFileTypes
 getFilenamesForChunk :: ChunkNo -> [FileType] -> [String]
 getFilenamesForChunk cn = map (\ft -> Text.unpack $ getFileName ft cn)
 
+getTopLevelConfigFilePath :: IO FilePath
+getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
+
 ioQuickN :: forall prop. Testable prop => Int -> IO prop -> Property
 ioQuickN n = withMaxSuccess n . ioProperty
 
@@ -82,8 +93,8 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
       , odcPrefetchAhead = podcPrefetchAhead
       }
 
-getTopLevelConfigFilePath :: IO FilePath
-getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
+testWithFileServer :: ServerFolder -> (Port -> IO a) -> IO a
+testWithFileServer (ServerFolder dataDir) = testWithApplication (pure $ staticApp $ defaultFileServerSettings dataDir)
 
 -- Trace values of given type to given file by appending the 'show' representation with a newline.
 tracerToFile :: Show a => FilePath -> Tracer IO a

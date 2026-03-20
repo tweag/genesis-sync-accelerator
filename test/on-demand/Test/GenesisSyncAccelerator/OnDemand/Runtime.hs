@@ -27,8 +27,6 @@ import GenesisSyncAccelerator.OnDemand
   )
 import GenesisSyncAccelerator.RemoteStorage (RemoteTipInfo (..))
 import GenesisSyncAccelerator.Types (StandardBlock)
-import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
-import Network.Wai.Handler.Warp (testWithApplication)
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , ConvertRawHash (fromRawHash, toRawHash)
@@ -44,11 +42,17 @@ import System.FS.IO (HandleIO)
 import System.FilePath (takeDirectory, (</>))
 import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
-import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
+import Test.GenesisSyncAccelerator.Types
+  ( ConfigFile (..)
+  , PartialOnDemandConfig (..)
+  , ServerFolder (..)
+  , TmpDir (..)
+  )
 import Test.GenesisSyncAccelerator.Utilities
   ( getTopLevelConfigFilePath
   , ioQuickly
   , mkFullConfig
+  , testWithFileServer
   )
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
@@ -105,14 +109,13 @@ prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing :: PartialOnDemandConfig 
 prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing partialConfig =
   ioQuickly $
     withTemp $ \tmp -> do
-      testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $
-        \port -> do
-          mbMTip <-
-            getTopLevelConfigFilePath
-              >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
-              >>= newOnDemandRuntime
-              >>= atomically . readOnDemandTip
-          return $ mbMTip === Nothing
+      testWithFileServer (ServerFolder tmp) $ \port -> do
+        mbMTip <-
+          getTopLevelConfigFilePath
+            >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
+            >>= newOnDemandRuntime
+            >>= atomically . readOnDemandTip
+        return $ mbMTip === Nothing
 
 prop_RemoteTipInfoRoundtripsThroughJSON :: RemoteTipInfo -> Property
 prop_RemoteTipInfoRoundtripsThroughJSON tipInfo = decode (encode tipInfo) === Just tipInfo
@@ -131,7 +134,7 @@ prop_newOnDemandRuntimeFetchesRemoteTip partialConfig =
     withTemp $ \remoteDir -> do
       LBS.writeFile (remoteDir </> "tip.json") (encode tipInfo)
       withTemp $ \cacheDir -> do
-        testWithApplication (pure $ staticApp $ defaultFileServerSettings remoteDir) $ \port -> do
+        testWithFileServer (ServerFolder remoteDir) $ \port -> do
           mbTip <-
             getTopLevelConfigFilePath
               >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir cacheDir) port)
@@ -169,7 +172,7 @@ checkFromConfig ::
 checkFromConfig partialConfig mkProp =
   withTemp $ \tmp -> do
     cfg <- getTopLevelConfigFilePath
-    testWithApplication (pure $ staticApp $ defaultFileServerSettings $ takeDirectory cfg) $
+    testWithFileServer (ServerFolder $ takeDirectory cfg) $
       mkFullConfig partialConfig (ConfigFile cfg) (TmpDir tmp) >=> mkProp
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
