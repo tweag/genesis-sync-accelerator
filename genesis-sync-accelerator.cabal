@@ -170,6 +170,9 @@ library gsa-testlib
     ouroboros-consensus,
     text,
 
+  other-modules:
+    Paths_genesis_sync_accelerator
+
 test-suite storage-tests
   import: common-all, common-test
   main-is: Main.hs
@@ -254,5 +257,4 @@ test-suite on-demand-tests
     warp,
 
   other-modules:
-    Paths_genesis_sync_accelerator
     Test.GenesisSyncAccelerator.OnDemand.Runtime

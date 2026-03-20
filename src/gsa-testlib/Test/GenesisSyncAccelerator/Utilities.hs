@@ -11,7 +11,7 @@ module Test.GenesisSyncAccelerator.Utilities
   , getCurrentFilenamesForChunk
   , ioQuickly
   , mkFullConfig
-  , topLevelConfigFileRelativePath
+  , getTopLevelConfigFilePath
   , tracerToFile
   ) where
 
@@ -22,6 +22,7 @@ import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Ouroboros.Consensus.Config (configCodec)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
+import Paths_genesis_sync_accelerator (getDataFileName)
 import System.FS.IO (HandleIO)
 import System.FilePath ((</>))
 import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
@@ -81,8 +82,8 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
       , odcPrefetchAhead = podcPrefetchAhead
       }
 
-topLevelConfigFileRelativePath :: FilePath
-topLevelConfigFileRelativePath = "test" </> "data" </> "config" </> "config.json"
+getTopLevelConfigFilePath :: IO FilePath
+getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
 
 -- Trace values of given type to given file by appending the 'show' representation with a newline.
 tracerToFile :: Show a => FilePath -> Tracer IO a

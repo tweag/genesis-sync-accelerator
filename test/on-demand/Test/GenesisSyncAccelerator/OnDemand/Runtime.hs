@@ -8,6 +8,7 @@
 module Test.GenesisSyncAccelerator.OnDemand.Runtime (tests) where
 
 import Control.Concurrent.Class.MonadSTM.Strict.TVar.Checked (readTVarIO)
+import Control.Monad ((>=>))
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Aeson (ToJSON (..), decode, encode, object, (.=))
@@ -39,16 +40,15 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
   ( ChunkInfo (..)
   , ChunkSize (..)
   )
-import Paths_genesis_sync_accelerator (getDataFileName)
 import System.FS.IO (HandleIO)
 import System.FilePath (takeDirectory, (</>))
 import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
 import Test.GenesisSyncAccelerator.Utilities
-  ( ioQuickly
+  ( getTopLevelConfigFilePath
+  , ioQuickly
   , mkFullConfig
-  , topLevelConfigFileRelativePath
   )
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
@@ -107,9 +107,12 @@ prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing partialConfig =
     withTemp $ \tmp -> do
       testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $
         \port -> do
-          config <- mkFullConfig partialConfig (ConfigFile topLevelConfigFileRelativePath) (TmpDir tmp) port
-          mbTip <- newOnDemandRuntime config >>= atomically . readOnDemandTip
-          return $ mbTip === Nothing
+          mbMTip <-
+            getTopLevelConfigFilePath
+              >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
+              >>= newOnDemandRuntime
+              >>= atomically . readOnDemandTip
+          return $ mbMTip === Nothing
 
 prop_RemoteTipInfoRoundtripsThroughJSON :: RemoteTipInfo -> Property
 prop_RemoteTipInfoRoundtripsThroughJSON tipInfo = decode (encode tipInfo) === Just tipInfo
@@ -129,9 +132,11 @@ prop_newOnDemandRuntimeFetchesRemoteTip partialConfig =
       LBS.writeFile (remoteDir </> "tip.json") (encode tipInfo)
       withTemp $ \cacheDir -> do
         testWithApplication (pure $ staticApp $ defaultFileServerSettings remoteDir) $ \port -> do
-          configFile <- getDataFileName topLevelConfigFileRelativePath
-          config <- mkFullConfig partialConfig (ConfigFile configFile) (TmpDir cacheDir) port
-          mbTip <- newOnDemandRuntime config >>= atomically . readOnDemandTip
+          mbTip <-
+            getTopLevelConfigFilePath
+              >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir cacheDir) port)
+              >>= newOnDemandRuntime
+              >>= atomically . readOnDemandTip
           pure $ case mbTip of
             Nothing -> counterexample "Failed to fetch tip" False
             Just observedTip ->
@@ -163,13 +168,9 @@ checkFromConfig ::
   PartialOnDemandConfig -> (OnDemandConfig IO StandardBlock HandleIO -> IO Property) -> IO Property
 checkFromConfig partialConfig mkProp =
   withTemp $ \tmp -> do
-    configFile <- getDataFileName topLevelConfigFileRelativePath
-    let dataDir = takeDirectory configFile
-        tmpdir = TmpDir tmp
-    testWithApplication (pure $ staticApp $ defaultFileServerSettings dataDir) $
-      \port -> do
-        config <- mkFullConfig partialConfig (ConfigFile configFile) tmpdir port
-        mkProp config
+    cfg <- getTopLevelConfigFilePath
+    testWithApplication (pure $ staticApp $ defaultFileServerSettings $ takeDirectory cfg) $
+      mkFullConfig partialConfig (ConfigFile cfg) (TmpDir tmp) >=> mkProp
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "on-demand-runtime-test"
