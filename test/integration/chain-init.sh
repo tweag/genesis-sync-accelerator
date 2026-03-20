@@ -8,7 +8,9 @@ source "$SCRIPT_DIR/lib.sh"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 TIMEOUT=600
 DB_DIR="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
-NODE_PORT="${NODE_PORT:-3001}"
+# Port changed from 3001 to avoid a clash with an existing service on the Tweag
+# builder. Picked randomly, but consistent to avoid introducing randomness.
+NODE_PORT="${NODE_PORT:-8783}"
 CONFIG="$SCRIPT_DIR/config/config.json"
 TOPOLOGY="$SCRIPT_DIR/config/topology.json"
 IMMUTABLE_DIR="$DB_DIR/immutable"
