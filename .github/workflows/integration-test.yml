@@ -1,0 +1,17 @@
+name: integration-test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  integration-test:
+    runs-on: [self-hosted, Linux, X64, tweag-infra]
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run integration test
+        run: nix develop .#integration-test --command bash test/integration/run-test.sh

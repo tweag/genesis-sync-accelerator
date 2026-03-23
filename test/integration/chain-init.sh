@@ -8,7 +8,9 @@ source "$SCRIPT_DIR/lib.sh"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 TIMEOUT=600
 DB_DIR="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
-NODE_PORT="${NODE_PORT:-3001}"
+# Port changed from 3001 to avoid a clash with an existing service on the Tweag
+# builder. Picked randomly, but consistent to avoid introducing randomness.
+NODE_PORT="${NODE_PORT:-8783}"
 CONFIG="$SCRIPT_DIR/config/config.json"
 TOPOLOGY="$SCRIPT_DIR/config/topology.json"
 IMMUTABLE_DIR="$DB_DIR/immutable"
@@ -31,15 +33,17 @@ fi
 WORKDIR="$(dirname "$DB_DIR")"
 mkdir -p "$WORKDIR" "$DB_DIR"
 
+SOCK="$(mktemp -u -t gsa-chain-init.XXXXXX.sock)"
+
 NODE_PID=""
-trap 'if [[ -n "$NODE_PID" ]]; then kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null || true; fi; rm -f "$WORKDIR/node.sock"' EXIT
+trap 'if [[ -n "$NODE_PID" ]]; then kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null || true; fi; rm -f "$SOCK"' EXIT
 
 cardano-node run \
   --config "$CONFIG" \
   --database-path "$DB_DIR" \
   --topology "$TOPOLOGY" \
   --port "$NODE_PORT" \
-  --socket-path "$WORKDIR/node.sock" \
+  --socket-path "$SOCK" \
   >"$WORKDIR/node.log" 2>&1 &
 NODE_PID=$!
 

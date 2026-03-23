@@ -30,9 +30,11 @@ fi
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-CDN_PORT="${CDN_PORT:-3000}"
-ACCEL_PORT="${ACCEL_PORT:-3002}"
-CONSUMER_PORT="${CONSUMER_PORT:-3001}"
+# Ports changed from 3001 to avoid a clash with an existing service on the Tweag
+# builder. Picked randomly, but consistent to avoid introducing randomness.
+CDN_PORT="${CDN_PORT:-8780}"
+ACCEL_PORT="${ACCEL_PORT:-8781}"
+CONSUMER_PORT="${CONSUMER_PORT:-8782}"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 MAX_CACHED_CHUNKS=25
 RTS_FREQUENCY="${RTS_FREQUENCY:-2000}"  # Accelerator RTS event log frequency in ms.

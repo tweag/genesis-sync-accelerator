@@ -21,3 +21,4 @@ jobs:
 
       - name: Build ${{ matrix.target }}
         run: nix build .#hydraJobs.x86_64-linux.${{ matrix.target }} --print-build-logs
+
