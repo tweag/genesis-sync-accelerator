@@ -45,6 +45,8 @@ main = withStdTerminalHandles $ do
           , chainSyncMessageTracer = showTracing stdoutTracer
           , chainSyncEventTracer = showTracing stdoutTracer
           , remoteStorageTracer = showTracing stdoutTracer
+          , handshakeTracer = showTracing stdoutTracer
+          , bearerTracer = showTracing stdoutTracer
           }
   cacheDir <- maybe (getXdgDirectory XdgCache "genesis-sync-accelerator") pure remoteStorageCacheDir
   pInfoConfig <- getTopLevelConfig configFile

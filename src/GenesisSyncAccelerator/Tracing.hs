@@ -3,8 +3,10 @@
 module GenesisSyncAccelerator.Tracing
   ( BlockFetchEventTracer
   , BlockFetchMessageTracer
+  , BearerTracer
   , ChainSyncEventTracer
   , ChainSyncMessageTracer
+  , HandshakeTracer
   , RemoteStorageTracer
   , Tracers (..)
   , TraceDownloadFailure (..)
@@ -14,6 +16,7 @@ module GenesisSyncAccelerator.Tracing
 
 import Cardano.Logging.Resources (readResourceStats)
 import Cardano.Logging.Types (LogFormatting (..))
+import Codec.CBOR.Term (Term)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Monad (forever)
@@ -21,6 +24,8 @@ import Control.Monad.Class.MonadAsync (link)
 import Data.Text (unpack)
 import Data.Word (Word64)
 import GHC.Conc (labelThread, myThreadId)
+import Network.Mux (BearerTrace, WithBearer)
+import Network.Socket (SockAddr)
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
   ( TraceBlockFetchServerEvent
   )
@@ -31,9 +36,12 @@ import Ouroboros.Consensus.Storage.Serialisation
   ( SerialisedHeader
   )
 import Ouroboros.Network.Block (Point, Serialised, Tip)
+import Ouroboros.Network.ConnectionId (ConnectionId)
 import Ouroboros.Network.Driver.Simple (TraceSendRecv)
+import Ouroboros.Network.NodeToNode (NodeToNodeVersion)
 import Ouroboros.Network.Protocol.BlockFetch.Type (BlockFetch)
 import Ouroboros.Network.Protocol.ChainSync.Type (ChainSync)
+import Ouroboros.Network.Protocol.Handshake.Type (Handshake)
 import "contra-tracer" Control.Tracer (Tracer, contramap, traceWith)
 
 type BlockFetchMessageTracer m blk =
@@ -49,6 +57,12 @@ type ChainSyncEventTracer m blk =
   Tracer m (TraceChainSyncServerEvent blk)
 
 type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
+
+type HandshakeTracer m =
+  Tracer m (WithBearer (ConnectionId SockAddr) (TraceSendRecv (Handshake NodeToNodeVersion Term)))
+
+type BearerTracer m =
+  Tracer m (WithBearer (ConnectionId SockAddr) BearerTrace)
 
 -- | Events traced by the Remote Storage client.
 data TraceRemoteStorageEvent
@@ -78,6 +92,8 @@ data Tracers m blk = Tracers
   , chainSyncMessageTracer :: ChainSyncMessageTracer m blk
   , chainSyncEventTracer :: ChainSyncEventTracer m blk
   , remoteStorageTracer :: RemoteStorageTracer m
+  , handshakeTracer :: HandshakeTracer m
+  , bearerTracer :: BearerTracer m
   }
 
 -- | Starts a background thread to periodically trace resource statistics.
