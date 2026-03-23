@@ -24,6 +24,7 @@ import Control.ResourceRegistry
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Functor ((<&>))
+import Data.List (find)
 import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 import GHC.Generics (Generic)
@@ -247,14 +248,17 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
 
         followerClose = ImmutableDB.iteratorClose =<< readTVarIO varIterator
 
-        followerForward [] = pure Nothing
-        followerForward (pt : _pts) =
-          OnDemand.onDemandIteratorFrom onDemand blockComponent (StreamFromExclusive pt) >>= \iterator -> do
-            followerClose
-            atomically $ do
-              writeTVar varIterator iterator
-              writeTVar varIntersection $ JustNegotiatedIntersection pt
-            pure $ Just pt
+        followerForward pts = do
+          mbTip <- atomically $ OnDemand.readOnDemandTip onDemand
+          case find (withinTip mbTip) pts of
+            Nothing -> pure Nothing
+            Just pt ->
+              OnDemand.onDemandIteratorFrom onDemand blockComponent (StreamFromExclusive pt) >>= \iterator -> do
+                followerClose
+                atomically $ do
+                  writeTVar varIterator iterator
+                  writeTVar varIntersection $ JustNegotiatedIntersection pt
+                pure $ Just pt
 
     pure
       Follower
@@ -263,6 +267,11 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
         , followerForward
         , followerClose
         }
+
+  withinTip :: Maybe (OnDemand.OnDemandTip blk) -> Point blk -> Bool
+  withinTip _ GenesisPoint = True
+  withinTip Nothing (BlockPoint _ _) = False
+  withinTip (Just tip) (BlockPoint slot _) = slot < OnDemand.odtSlot tip
 
   getImmutableTip :: STM m (Tip blk)
   getImmutableTip = maybe TipGenesis tipFromOnDemandTip <$> OnDemand.readOnDemandTip onDemand
