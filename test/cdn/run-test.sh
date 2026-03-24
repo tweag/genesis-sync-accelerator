@@ -26,7 +26,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Config files live in the GSA integration test directory.
-CONFIG_DIR="$(cd "$SCRIPT_DIR/../integration/config" && pwd)"
+CONFIG_DIR="$(cd "$SCRIPT_DIR/../integration/config" && pwd)" \
+  || { echo "ERROR: config directory not found: $SCRIPT_DIR/../integration/config"; exit 1; }
 
 source "$SCRIPT_DIR/lib.sh"
 
@@ -74,8 +75,8 @@ cleanup() {
   echo "=== Cleanup ==="
   for pid in "${PIDS[@]}"; do
     if kill -0 "$pid" 2>/dev/null; then
-      echo "  Stopping pid $pid"
-      kill "$pid" 2>/dev/null || true
+      echo "  Stopping process group $pid"
+      kill -- -"$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
     fi
   done
@@ -242,13 +243,13 @@ echo ""
 echo "${BOLD}=== Stopping node and uploader ===${NC}"
 
 if kill -0 "$NODE_PID" 2>/dev/null; then
-  kill "$NODE_PID" 2>/dev/null || true
+  kill -- -"$NODE_PID" 2>/dev/null || true
   wait "$NODE_PID" 2>/dev/null || true
   echo "  cardano-node stopped"
 fi
 
 if kill -0 "$UPLOADER_PID" 2>/dev/null; then
-  kill "$UPLOADER_PID" 2>/dev/null || true
+  kill -- -"$UPLOADER_PID" 2>/dev/null || true
   wait "$UPLOADER_PID" 2>/dev/null || true
   echo "  chunk-uploader stopped"
 fi

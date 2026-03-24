@@ -28,7 +28,7 @@ start_minio() {
   local data_dir="$1" port="$2" console_port="$3" user="$4" password="$5" log_file="$6"
   MINIO_ROOT_USER="$user" \
   MINIO_ROOT_PASSWORD="$password" \
-    minio server "$data_dir" \
+    setsid minio server "$data_dir" \
       --address ":${port}" \
       --console-address ":${console_port}" \
       >"$log_file" 2>&1 &
@@ -42,7 +42,7 @@ start_chunk_uploader() {
   local poll_interval="$6" state_file="$7" user="$8" password="$9" log_file="${10}"
   AWS_ACCESS_KEY_ID="$user" \
   AWS_SECRET_ACCESS_KEY="$password" \
-    stdbuf -oL ${CHUNK_UPLOADER:-chunk-uploader} \
+    setsid stdbuf -oL ${CHUNK_UPLOADER:-chunk-uploader} \
       --immutable-dir "$immutable_dir" \
       --s3-bucket "$bucket" \
       --s3-prefix "$prefix" \

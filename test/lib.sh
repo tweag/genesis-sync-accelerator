@@ -28,7 +28,7 @@ wait_for_port() {
 # start_cardano_node <config> <db_path> <topology> <port> <socket> <log_file>
 start_cardano_node() {
   local config="$1" db_path="$2" topology="$3" port="$4" socket="$5" log_file="$6"
-  stdbuf -oL cardano-node run \
+  setsid stdbuf -oL cardano-node run \
     --config "$config" \
     --database-path "$db_path" \
     --topology "$topology" \
