@@ -19,6 +19,7 @@ module GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator) where
 
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO)
 import Control.ResourceRegistry
 import Data.ByteString.Lazy (ByteString)
@@ -221,11 +222,32 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
           (StreamFromExclusive GenesisPoint)
     varIntersection <-
       newTVarIO $ JustNegotiatedIntersection GenesisPoint
+    varLastPoint <-
+      newTVarIO GenesisPoint
     let getNextBlock = do
           iterator <- readTVarIO varIterator
           ImmutableDB.iteratorNext iterator >>= \case
             ImmutableDB.IteratorExhausted -> return Nothing
-            ImmutableDB.IteratorResult a -> return (Just a)
+            ImmutableDB.IteratorResult a -> do
+              atomically $ writeTVar varLastPoint (ChainDB.point a)
+              return (Just a)
+
+        waitForTipChange = do
+          currentTip <- atomically $ OnDemand.readOnDemandTip onDemand
+          atomically $ do
+            newTip <- OnDemand.readOnDemandTip onDemand
+            when (newTip == currentTip) retry
+
+        resumeFromLastPoint = do
+          lastPt <- readTVarIO varLastPoint
+          newIt <-
+            OnDemand.onDemandIteratorFrom
+              onDemand
+              blockComponent
+              (StreamFromExclusive lastPt)
+          oldIt <- readTVarIO varIterator
+          ImmutableDB.iteratorClose oldIt
+          atomically $ writeTVar varIterator newIt
 
         followerInstructionBlocking =
           readTVarIO varIntersection >>= \case
@@ -234,7 +256,12 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
                 writeTVar varIntersection AlreadySentRollbackToIntersection
               pure $ RollBack intersectionPt
             AlreadySentRollbackToIntersection ->
-              getNextBlock >>= maybe sleepForever (pure . AddBlock)
+              getNextBlock >>= \case
+                Just block -> pure $ AddBlock block
+                Nothing -> do
+                  waitForTipChange
+                  resumeFromLastPoint
+                  followerInstructionBlocking
 
         followerInstructionNonBlocking =
           readTVarIO varIntersection >>= \case
@@ -254,6 +281,7 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
             atomically $ do
               writeTVar varIterator iterator
               writeTVar varIntersection $ JustNegotiatedIntersection pt
+              writeTVar varLastPoint pt
             pure $ Just pt
 
     pure

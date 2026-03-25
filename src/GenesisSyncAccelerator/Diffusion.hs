@@ -5,13 +5,18 @@
 
 module GenesisSyncAccelerator.Diffusion (run) where
 
+import Control.Monad (forever)
 import qualified Data.ByteString.Lazy as BL
 import Data.Void (Void)
 import GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (BearerTracer, HandshakeTracer, Tracers (..))
-import GenesisSyncAccelerator.Types (MaxCachedChunksCount, PrefetchChunksCount)
+import GenesisSyncAccelerator.Types
+  ( MaxCachedChunksCount
+  , PrefetchChunksCount
+  , TipRefreshInterval (..)
+  )
 import GenesisSyncAccelerator.Util (fpToHasFS)
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
@@ -86,11 +91,12 @@ run ::
   RemoteStorage.RemoteStorageConfig ->
   MaxCachedChunksCount ->
   PrefetchChunksCount ->
+  TipRefreshInterval ->
   Tracers IO blk ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run remoteCfg maxCachedChunks prefetchAhead tracers sockAddr cfg = do
+run remoteCfg maxCachedChunks prefetchAhead tipRefreshInterval tracers sockAddr cfg = do
   let cacheDir = RemoteStorage.rscDstDir remoteCfg
       hasFS = fpToHasFS cacheDir
   onDemand <-
@@ -105,6 +111,11 @@ run remoteCfg maxCachedChunks prefetchAhead tracers sockAddr cfg = do
         , OnDemand.odcMaxCachedChunks = maxCachedChunks
         , OnDemand.odcPrefetchAhead = prefetchAhead
         }
+  let TipRefreshInterval refreshSeconds = tipRefreshInterval
+  tipThread <- async $ forever $ do
+    threadDelay (fromIntegral refreshSeconds)
+    OnDemand.refreshTip onDemand
+  link tipThread
   serve sockAddr (handshakeTracer tracers) (bearerTracer tracers) $
     genesisSyncAccelerator
       tracers

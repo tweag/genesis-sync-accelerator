@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 -- | HTTP client for downloading ImmutableDB chunks from a CDN.
 --
@@ -26,6 +27,7 @@ module GenesisSyncAccelerator.RemoteStorage
 
 import Control.Exception (SomeException, try)
 import Control.Monad.Catch (MonadThrow)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (FromJSON (..), ToJSON (..), eitherDecode, object, withObject, (.:), (.=))
 import qualified Data.Bifunctor as Bifunctor
 import qualified Data.ByteString as BS
@@ -114,47 +116,52 @@ downloadFile ::
   ChunkNo ->
   FileType ->
   IO (Either TraceDownloadFailure FilePath)
-downloadFile eventTracer env chunk fileType = do
-  let cfg = rseConfig env
-      manager = rseManager env
-      filename = Text.unpack $ getFileName fileType chunk
-      localPath = rscDstDir cfg </> filename
-      processResponse r =
-        case statusCode (responseStatus r) of
-          200 -> do
-            let body = responseBody r
-            LBS.writeFile localPath body
-            traceWith eventTracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
-            pure $ Right localPath
-          status -> traceFail $ TraceDownloadError filename status
-      traceFail f = traceWith (contramap TraceDownloadFailure eventTracer) f >> pure (Left f)
-  -- Construct request
-  request <- getRequest cfg filename
-  -- Perform the download
-  traceWith eventTracer $ TraceDownloadStart filename
-  (try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString)))
-    >>= either (traceFail . TraceDownloadException filename . show) processResponse
+downloadFile eventTracer env chunk fileType =
+  let filename = Text.unpack $ getFileName fileType chunk
+      localPath = rscDstDir (rseConfig env) </> filename
+      traceSuccess url response = TraceDownloadSuccess url (fromIntegral (LBS.length (responseBody response)))
+      procBody body = LBS.writeFile localPath body >> pure (Right localPath)
+   in tryFileRequest TraceDownloadStart procBody traceSuccess eventTracer env filename
 
 getRequest :: MonadThrow m => RemoteStorageConfig -> String -> m Request
 getRequest cfg name = parseRequest (rscSrcUrl cfg ++ "/" ++ name)
 
 fetchTipInfo ::
   RemoteStorageTracer IO -> RemoteStorageEnv -> IO (Either TraceDownloadFailure RemoteTipInfo)
-fetchTipInfo tracer env = do
-  request <- getRequest (rseConfig env) "tip.json"
-  let tipUrl = show $ getUri request
-      mapEx :: SomeException -> TraceDownloadFailure
-      mapEx = TraceDownloadException tipUrl . show
-      processResponse r =
-        case statusCode (responseStatus r) of
-          200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
-          status -> Left $ TraceDownloadError tipUrl status
-  traceWith tracer $ TraceTipFetchStart tipUrl
-  outcome <- either (Left . mapEx) processResponse <$> try (httpLbs request (rseManager env))
+fetchTipInfo tracer env =
+  tryFileRequest
+    TraceTipFetchStart
+    (pure <$> eitherDecode)
+    (\url _ -> TraceTipFetchSuccess url)
+    tracer
+    env
+    "tip.json"
+
+tryFileRequest ::
+  forall m result.
+  (MonadIO m, MonadThrow m) =>
+  (String -> TraceRemoteStorageEvent) ->
+  (LBS.ByteString -> IO (Either String result)) ->
+  (String -> Response LBS.ByteString -> TraceRemoteStorageEvent) ->
+  RemoteStorageTracer m ->
+  RemoteStorageEnv ->
+  String ->
+  m (Either TraceDownloadFailure result)
+tryFileRequest traceStart procBody traceSuccess tr env filename = do
+  req <- getRequest (rseConfig env) filename
+  traceWith tr $ traceStart $ getUrl req
+  outcome <-
+    liftIO $
+      (try (httpLbs req (rseManager env)) :: IO (Either SomeException (Response LBS.ByteString)))
+        >>= either (pure . Left . TraceDownloadException (getUrl req) . show) (processResponse req)
   case outcome of
-    Right _ -> traceWith tracer $ TraceTipFetchSuccess tipUrl
-    Left failure -> traceWith (contramap TraceDownloadFailure tracer) failure
-  return outcome
+    Left f -> traceWith tr (TraceDownloadFailure f) >> pure (Left f)
+    Right (response, result) -> traceWith tr (traceSuccess (getUrl req) response) >> pure (Right result)
+ where
+  getUrl = show . getUri
+  processResponse req r = case statusCode (responseStatus r) of
+    200 -> Bifunctor.bimap (TraceDownloadException (getUrl req)) (r,) <$> procBody (responseBody r)
+    status -> pure $ Left $ TraceDownloadError (getUrl req) status
 
 instance FromJSON RemoteTipInfo where
   parseJSON = withObject "RemoteTipInfo" $ \o ->

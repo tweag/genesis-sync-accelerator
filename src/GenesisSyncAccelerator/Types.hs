@@ -4,6 +4,7 @@ module GenesisSyncAccelerator.Types
   , PrefetchChunksCount (..)
   , StandardBlock
   , StandardTopLevelConfig
+  , TipRefreshInterval (..)
   ) where
 
 import Data.Word (Word8)
@@ -17,6 +18,10 @@ type HostAddr = (Word8, Word8, Word8, Word8)
 
 -- | Specification of maximum number of chunks to keep in cache
 newtype MaxCachedChunksCount = MaxCachedChunksCount Natural
+  deriving (Eq, Show)
+
+-- | How often to refresh the tip from the CDN, in seconds.
+newtype TipRefreshInterval = TipRefreshInterval Natural
   deriving (Eq, Show)
 
 -- | How many chunks ahead of the current to fetch in advance

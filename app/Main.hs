@@ -11,7 +11,12 @@ import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..), startResourceTracer)
-import GenesisSyncAccelerator.Types (HostAddr, MaxCachedChunksCount (..), PrefetchChunksCount (..))
+import GenesisSyncAccelerator.Types
+  ( HostAddr
+  , MaxCachedChunksCount (..)
+  , PrefetchChunksCount (..)
+  , TipRefreshInterval (..)
+  )
 import GenesisSyncAccelerator.Util (getTopLevelConfig)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
@@ -33,6 +38,7 @@ main = withStdTerminalHandles $ do
     , remoteStorageSrcUrl
     , maxCachedChunks
     , prefetchAhead
+    , tipRefreshInterval
     } <-
     execParser optsParser
   let sockAddr = Socket.SockAddrInet port hostAddr
@@ -58,6 +64,7 @@ main = withStdTerminalHandles $ do
       remoteCfg
       maxCachedChunks
       prefetchAhead
+      tipRefreshInterval
       tracers
       sockAddr
       pInfoConfig
@@ -82,6 +89,8 @@ data Opts = Opts
   -- ^ Maximum number of chunks to keep in cache.
   , prefetchAhead :: PrefetchChunksCount
   -- ^ Number of chunks to prefetch ahead of current position.
+  , tipRefreshInterval :: TipRefreshInterval
+  -- ^ How often to re-fetch the tip from the CDN, in seconds.
   }
 
 printHost :: (HostAddr, Socket.PortNumber) -> String
@@ -169,6 +178,17 @@ optsParser =
               , showDefault
               ]
           )
+    tipRefreshInterval <-
+      TipRefreshInterval
+        <$> option
+          auto
+          ( mconcat
+              [ long "tip-refresh-interval"
+              , help "How often to re-fetch the tip from the CDN, in seconds"
+              , value 600 -- 10 minutes
+              , showDefault
+              ]
+          )
     pure
       Opts
         { addr
@@ -179,4 +199,5 @@ optsParser =
         , remoteStorageSrcUrl
         , maxCachedChunks
         , prefetchAhead
+        , tipRefreshInterval
         }

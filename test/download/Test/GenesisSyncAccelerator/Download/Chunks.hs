@@ -62,7 +62,7 @@ prop_downloadChunk_downloads_files_as_expected_when_available =
         case initialTargetFolderContents of
           -- No file should yet be present in the target folder.
           [] -> do
-            unsafeDownloadChunk nullTracer setup targetChunk
+            _ <- unsafeDownloadChunk nullTracer setup targetChunk
             posthocTargetFolderContents <- listDirectory $ unClientFolder clientTmpdir
             -- After the download, each of the current file types should be represented for the
             -- target chunk by a file; there should be no other content in the target folder.
@@ -83,7 +83,6 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable :: Prope
 prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
   forAll gen_target_chunk_and_file_kernels_and_missing_file_types $ \(targetChunk, fileKernels, expectedMissingFileTypes) ->
     let httpErrorCode = 404
-        expectedErrors = map (\t -> TraceDownloadError (nameFile t targetChunk) httpErrorCode) expectedMissingFileTypes
         isExpectedLogLine l =
           "TraceDownloadFailure (TraceDownloadError " `List.isPrefixOf` l
             && (" " ++ show httpErrorCode ++ ")") `List.isSuffixOf` l
@@ -97,7 +96,11 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
               [] -> do
                 -- Precondition passes; call the function under test then check that
                 -- the logfile contains all the expected error messages.
-                unsafeDownloadChunk tracer setup targetChunk
+                port <- unsafeDownloadChunk tracer setup targetChunk
+                let expectedErrors =
+                      map
+                        (\t -> TraceDownloadError (getLocalUrl port ++ "/" ++ nameFile t targetChunk) httpErrorCode)
+                        expectedMissingFileTypes
                 logLines <- lines . Text.unpack <$> TIO.readFile logfile
                 pure $
                   List.sort (filter isExpectedLogLine logLines)
@@ -154,7 +157,7 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
               [] -> do
                 -- Run the function under test, then check that the list of files present
                 -- in the target folder is exactly as expected.
-                unsafeDownloadChunk nullTracer setup targetChunk
+                _ <- unsafeDownloadChunk nullTracer setup targetChunk
                 filesAfterDownload <- List.sort <$> listDirectory (unClientFolder clientTmpdir)
                 if filesAfterDownload /= allTargetChunkFileNames
                   then
@@ -235,11 +238,15 @@ unsafeDownloadChunk ::
   Tracer IO TraceRemoteStorageEvent ->
   TestFolderSetup ->
   ChunkNo ->
-  IO ()
+  IO Int
 unsafeDownloadChunk tracer TestFolderSetup{..} targetChunk =
   testWithFileServer serverTmpdir $ \port -> do
-    storageEnv <- newRemoteStorageEnv ("http://localhost:" ++ show port) (unClientFolder clientTmpdir)
+    storageEnv <- newRemoteStorageEnv (getLocalUrl port) (unClientFolder clientTmpdir)
     either (error . show) (const ()) <$> downloadChunk tracer storageEnv targetChunk
+    return port
+
+getLocalUrl :: Int -> String
+getLocalUrl port = "http://localhost:" ++ show port
 
 -- Within the given folder, create the filepaths specified by the given "kernel"s.
 setupFilesAndFolders :: FilePath -> [FileKernel] -> IO TestFolderSetup

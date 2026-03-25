@@ -5,7 +5,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -26,6 +25,7 @@ module GenesisSyncAccelerator.OnDemand
   , onDemandIteratorForRange
   , onDemandIteratorFrom
   , readOnDemandTip
+  , refreshTip
   ) where
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
@@ -43,7 +43,6 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
-import GenesisSyncAccelerator.Tracing (TraceRemoteStorageEvent (..))
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
 import qualified Network.HTTP.Client as HTTP
 import Ouroboros.Consensus.Block
@@ -111,7 +110,6 @@ import System.FS.API
   , removeFile
   , withFile
   )
-import "contra-tracer" Control.Tracer (traceWith)
 
 -- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
@@ -159,12 +157,10 @@ newOnDemandRuntime ::
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg@OnDemandConfig{odcRemote, odcTracer} = do
   env <- liftIO $ Remote.newRemoteStorageEnv (Remote.rscSrcUrl odcRemote) (Remote.rscDstDir odcRemote)
-  tip <- liftIO $ Remote.fetchTipInfo odcTracer env >>= procTip . fmap tipFromRemote
-  stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
+  mbTip <- liftIO $ tipFromRemoteEnv odcTracer env
+  stateVar <- newTVarIO (OnDemandState Set.empty [] mbTip)
   prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
   pure $ OnDemandRuntime cfg (Remote.rseManager env) stateVar prefetch
- where
-  procTip = either (\e -> traceWith odcTracer (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
 -- | Internal state tracking which chunks have been downloaded during the current session.
 data OnDemandState blk = OnDemandState
@@ -230,6 +226,19 @@ onDemandIteratorFrom odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcChunkInfo
 readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
 readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
 
+-- | Re-fetch the tip from the CDN and update the on-demand state.
+-- Failures are silently ignored (already traced by 'fetchTipInfo').
+refreshTip ::
+  forall blk m h.
+  (IOLike m, MonadIO m, ConvertRawHash blk) =>
+  OnDemandRuntime m blk h ->
+  m ()
+refreshTip odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcTracer}, odrState} = do
+  mbTip <- liftIO $ tipFromRemoteEnv odcTracer $ getRemoteStorageEnv odr
+  case mbTip of
+    Nothing -> pure ()
+    _ -> atomically $ readTVar odrState >>= \st -> writeTVar odrState st{odsTip = mbTip}
+
 -- | Creates an iterator that downloads and serves chunks one by one,
 -- with background prefetching of upcoming chunks.
 mkOnDemandIterator ::
@@ -249,18 +258,16 @@ mkOnDemandIterator ::
   NEL.NonEmpty ChunkNo ->
   m (Iterator m blk b)
 mkOnDemandIterator
-  OnDemandRuntime
+  odr@OnDemandRuntime
     { odrConfig =
       cfg@OnDemandConfig
-        { odcRemote
-        , odcHasFS
+        { odcHasFS
         , odcChunkInfo
         , odcCodecConfig
         , odcCheckIntegrity
         , odcTracer
         , odcPrefetchAhead = PrefetchChunksCount numPrefetch
         }
-    , odrManager
     , odrState
     , odrPrefetch
     }
@@ -278,7 +285,7 @@ mkOnDemandIterator
     varPrefetchWindow <- newTVarIO []
 
     let
-      remoteEnv = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
+      remoteEnv = getRemoteStorageEnv odr
       decPin n = if n <= 1 then Nothing else Just (n - 1)
 
       updatePrefetchWindow newWindow = do
@@ -652,10 +659,22 @@ applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
   takeWhile $ \(WithBlockSize _ e) ->
     ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
 
-tipFromRemote :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
-tipFromRemote tip =
+tipFromRemoteEnv ::
+  forall blk.
+  ConvertRawHash blk =>
+  Remote.RemoteStorageTracer IO ->
+  Remote.RemoteStorageEnv ->
+  IO (Maybe (OnDemandTip blk))
+tipFromRemoteEnv tr env = either (const Nothing) (Just . tipFromRemoteInfo) <$> Remote.fetchTipInfo tr env
+
+tipFromRemoteInfo :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
+tipFromRemoteInfo info =
   OnDemandTip
-    { odtSlot = SlotNo (Remote.rtiSlot tip)
-    , odtHash = fromRawHash (Proxy @blk) (Remote.rtiHashBytes tip)
-    , odtBlockNo = BlockNo (Remote.rtiBlockNo tip)
+    { odtSlot = SlotNo (Remote.rtiSlot info)
+    , odtHash = fromRawHash (Proxy @blk) (Remote.rtiHashBytes info)
+    , odtBlockNo = BlockNo (Remote.rtiBlockNo info)
     }
+
+getRemoteStorageEnv :: OnDemandRuntime m blk h -> Remote.RemoteStorageEnv
+getRemoteStorageEnv OnDemandRuntime{odrManager, odrConfig = OnDemandConfig{odcRemote}} =
+  Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
