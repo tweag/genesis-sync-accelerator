@@ -36,6 +36,7 @@ import Test.GenesisSyncAccelerator.Utilities
   , currentFileTypes
   , genSeveralChunkNumbers
   , getCurrentFilenamesForChunk
+  , getLocalUrl
   , testWithFileServer
   , tracerToFile
   )
@@ -244,9 +245,6 @@ unsafeDownloadChunk tracer TestFolderSetup{..} targetChunk =
     storageEnv <- newRemoteStorageEnv (getLocalUrl port) (unClientFolder clientTmpdir)
     either (error . show) (const ()) <$> downloadChunk tracer storageEnv targetChunk
     return port
-
-getLocalUrl :: Int -> String
-getLocalUrl port = "http://localhost:" ++ show port
 
 -- Within the given folder, create the filepaths specified by the given "kernel"s.
 setupFilesAndFolders :: FilePath -> [FileKernel] -> IO TestFolderSetup

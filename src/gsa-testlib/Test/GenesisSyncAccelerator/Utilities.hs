@@ -9,6 +9,7 @@ module Test.GenesisSyncAccelerator.Utilities
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
   , getCurrentFilenamesForChunk
+  , getLocalUrl
   , getTopLevelConfigFilePath
   , ioQuickly
   , mkFullConfig
@@ -64,6 +65,9 @@ getCurrentFilenamesForChunk cn = getFilenamesForChunk cn currentFileTypes
 getFilenamesForChunk :: ChunkNo -> [FileType] -> [String]
 getFilenamesForChunk cn = map (\ft -> Text.unpack $ getFileName ft cn)
 
+getLocalUrl :: Int -> String
+getLocalUrl port = "http://localhost:" ++ show port
+
 getTopLevelConfigFilePath :: IO FilePath
 getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
 
@@ -83,7 +87,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
   codecConfig <- configCodec <$> getTopLevelConfig configFile
   return $
     OnDemandConfig
-      { odcRemote = RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port, rscDstDir = tmpdir}
+      { odcRemote = RemoteStorageConfig{rscSrcUrl = getLocalUrl port, rscDstDir = tmpdir}
       , odcTracer = nullTracer
       , odcChunkInfo = podcChunkInfo
       , odcHasFS = fpToHasFS tmpdir
