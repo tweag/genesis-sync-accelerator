@@ -8,6 +8,7 @@
 module Test.GenesisSyncAccelerator.OnDemand.Runtime (tests) where
 
 import Control.Concurrent.Class.MonadSTM.Strict.TVar.Checked (readTVarIO)
+import Control.Exception (SomeException, try)
 import Control.Monad ((>=>))
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
@@ -39,7 +40,7 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
   , ChunkSize (..)
   )
 import System.FS.IO (HandleIO)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Types
@@ -105,17 +106,19 @@ prop_newOnDemandRuntimeStartsWithEmptyUsageOrder partialConfig =
       usageOrder <- odsUsageOrder <$> readTVarIO (odrState runtime)
       return $ property $ null usageOrder
 
-prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing :: PartialOnDemandConfig -> Property
-prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing partialConfig =
+prop_newOnDemandRuntimeFailsIfRemoteMissing :: PartialOnDemandConfig -> Property
+prop_newOnDemandRuntimeFailsIfRemoteMissing partialConfig =
   ioQuickly $
     withTemp $ \tmp -> do
       testWithFileServer (ServerFolder tmp) $ \port -> do
-        mbMTip <-
-          getTopLevelConfigFilePath
-            >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
-            >>= newOnDemandRuntime
-            >>= atomically . readOnDemandTip
-        return $ mbMTip === Nothing
+        result <-
+          try @SomeException $
+            getTopLevelConfigFilePath
+              >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
+              >>= newOnDemandRuntime
+        return $ case result of
+          Left _ -> property True
+          Right _ -> counterexample "Expected an exception when tip.json is missing" False
 
 prop_RemoteTipInfoRoundtripsThroughJSON :: RemoteTipInfo -> Property
 prop_RemoteTipInfoRoundtripsThroughJSON tipInfo = decode (encode tipInfo) === Just tipInfo
@@ -170,10 +173,19 @@ instance ToJSON (OnDemandTip StandardBlock) where
 checkFromConfig ::
   PartialOnDemandConfig -> (OnDemandConfig IO StandardBlock HandleIO -> IO Property) -> IO Property
 checkFromConfig partialConfig mkProp =
-  withTemp $ \tmp -> do
-    cfg <- getTopLevelConfigFilePath
-    testWithFileServer (ServerFolder $ takeDirectory cfg) $
-      mkFullConfig partialConfig (ConfigFile cfg) (TmpDir tmp) >=> mkProp
+  withTemp $ \tmp ->
+    withTemp $ \remoteDir -> do
+      cfg <- getTopLevelConfigFilePath
+      LBS.writeFile (remoteDir </> "tip.json") (encode dummyTipInfo)
+      testWithFileServer (ServerFolder remoteDir) $
+        mkFullConfig partialConfig (ConfigFile cfg) (TmpDir tmp) >=> mkProp
+ where
+  dummyTipInfo =
+    RemoteTipInfo
+      { rtiSlot = 0
+      , rtiBlockNo = 0
+      , rtiHashBytes = BS.replicate 32 0
+      }
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "on-demand-runtime-test"
@@ -193,8 +205,8 @@ tests =
         "newOnDemandRuntime starts with empty usage order"
         prop_newOnDemandRuntimeStartsWithEmptyUsageOrder
     , testProperty
-        "newOnDemandRuntime starts with Nothing when remote tip is missing"
-        prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing
+        "newOnDemandRuntime fails when remote tip is missing"
+        prop_newOnDemandRuntimeFailsIfRemoteMissing
     , testProperty
         "RemoteTipInfo roundtrips through JSON encoding/decoding"
         prop_RemoteTipInfoRoundtripsThroughJSON

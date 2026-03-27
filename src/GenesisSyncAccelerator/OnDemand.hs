@@ -98,6 +98,7 @@ import Ouroboros.Consensus.Util.IOLike
   , readTVar
   , readTVarIO
   , swapTVar
+  , throwIO
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
@@ -164,7 +165,10 @@ newOnDemandRuntime cfg@OnDemandConfig{odcRemote, odcTracer} = do
   prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
   pure $ OnDemandRuntime cfg (Remote.rseManager env) stateVar prefetch
  where
-  procTip = either (\e -> traceWith odcTracer (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
+  procTip (Left e) = do
+    traceWith odcTracer (TraceDownloadFailure e)
+    throwIO $ userError $ "Failed to fetch chain tip from CDN: " ++ show e
+  procTip (Right tip) = pure (Just tip)
 
 -- | Internal state tracking which chunks have been downloaded during the current session.
 data OnDemandState blk = OnDemandState
