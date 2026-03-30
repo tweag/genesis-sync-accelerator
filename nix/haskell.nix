@@ -37,6 +37,13 @@ let
         packages.amazonka-s3.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
         packages.amazonka-sso.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
         packages.amazonka-sts.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
+        # Haddock builds don't inherit ghcOptions, so disable them for packages
+        # that use duplicate record fields (incompatible with GHC 9.8+ by default).
+        packages.amazonka.doHaddock = false;
+        packages.amazonka-core.doHaddock = false;
+        packages.amazonka-s3.doHaddock = false;
+        packages.amazonka-sso.doHaddock = false;
+        packages.amazonka-sts.doHaddock = false;
       }
     ];
     flake.variants = {
