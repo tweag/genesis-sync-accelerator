@@ -49,3 +49,49 @@ executable chunk-uploader
     ouroboros-consensus,
     text,
     with-utf8,
+
+test-suite chunk-uploader-tests
+  main-is: Main.hs
+  hs-source-dirs:
+    src
+    test
+
+  type: exitcode-stdio-1.0
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wpartial-fields
+    -Widentities
+    -Wredundant-constraints
+    -Wmissing-export-lists
+    -Wunused-packages
+    -threaded
+    -rtsopts
+
+  other-modules:
+    ChunkUploader.Detection
+    ChunkUploader.S3
+    ChunkUploader.State
+    ChunkUploader.Types
+    Test.ChunkUploader.Detection
+    Test.ChunkUploader.S3
+    Test.ChunkUploader.State
+    Test.ChunkUploader.Types
+
+  build-depends:
+    aeson,
+    amazonka,
+    amazonka-s3,
+    base,
+    bytestring,
+    directory,
+    filepath,
+    genesis-sync-accelerator,
+    http-client,
+    ouroboros-consensus,
+    tasty,
+    tasty-hunit,
+    temporary,
+    text,

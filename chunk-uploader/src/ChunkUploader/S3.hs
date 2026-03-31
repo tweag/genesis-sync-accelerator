@@ -10,6 +10,7 @@ module ChunkUploader.S3
   , uploadChunkTriplet
   , uploadTipJson
   , chunkExistsOnS3
+  , parseEndpoint
   ) where
 
 import qualified Amazonka
