@@ -33,13 +33,17 @@ executable chunk-uploader
     ChunkUploader.Types
 
   build-depends:
+    aeson,
     amazonka,
     amazonka-s3,
     base,
     bytestring,
+    cardano-crypto-class,
+    cardano-slotting,
     contra-tracer,
     directory,
     filepath,
+    genesis-sync-accelerator,
     http-client,
     optparse-applicative,
     ouroboros-consensus,

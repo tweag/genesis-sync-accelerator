@@ -28,6 +28,9 @@ data UploaderConfig = UploaderConfig
   -- ^ Seconds between directory scans.
   , ucStateFile :: !(Maybe FilePath)
   -- ^ Optional explicit path for the state file.
+  , ucNodeConfig :: !(Maybe FilePath)
+  -- ^ Path to the Cardano node config file. When set, the uploader will
+  -- generate and upload @tip.json@ after each batch of new chunks.
   }
   deriving stock Show
 
@@ -43,6 +46,9 @@ data TraceUploaderEvent
   | TraceStateSaved !ChunkNo
   | TraceS3InitFailure !Text
   | TraceCredentialValidationFailure !Text
+  | TraceTipUploadStart
+  | TraceTipUploadSuccess
+  | TraceTipUploadFailure !String
   deriving stock (Eq, Show)
 
 -- | Build the filename for a chunk with a given extension.

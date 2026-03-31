@@ -1,10 +1,26 @@
-module GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig) where
+module GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig, getImmDbTip) where
 
 import qualified Cardano.Tools.DBAnalyser.Block.Cardano as Cardano
 import Cardano.Tools.DBAnalyser.HasAnalysis (mkProtocolInfo)
-import GenesisSyncAccelerator.Types (StandardTopLevelConfig)
+import Control.ResourceRegistry (runWithTempRegistry, withRegistry)
+import Data.Proxy (Proxy (..))
+import GHC.Conc (atomically)
+import GenesisSyncAccelerator.RemoteStorage (RemoteTipInfo (..))
+import GenesisSyncAccelerator.Types (StandardBlock, StandardTopLevelConfig)
+import Ouroboros.Consensus.Block
+  ( BlockNo (..)
+  , ConvertRawHash (toRawHash)
+  , SlotNo (..)
+  , WithOrigin
+  )
+import Ouroboros.Consensus.Config (configCodec, configStorage)
+import Ouroboros.Consensus.Node.InitStorage
+  ( NodeInitStorage (nodeCheckIntegrity, nodeImmutableDbChunkInfo)
+  )
 import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
-import System.FS.API (HasFS)
+import Ouroboros.Consensus.Storage.ImmutableDB (ImmutableDbArgs (..))
+import qualified Ouroboros.Consensus.Storage.ImmutableDB as ImmutableDB
+import System.FS.API (HasFS, SomeHasFS (..))
 import System.FS.API.Types (MountPoint (MountPoint))
 import System.FS.IO (HandleIO, ioHasFS)
 
@@ -15,3 +31,32 @@ fpToHasFS = ioHasFS . MountPoint
 -- | From the given config file, get a 'TopLevelConfig' for a standard Cardano block.
 getTopLevelConfig :: FilePath -> IO StandardTopLevelConfig
 getTopLevelConfig configFile = pInfoConfig <$> mkProtocolInfo (Cardano.CardanoBlockArgs configFile Nothing)
+
+-- | Open the ImmutableDB at the given path and return its current tip.
+getImmDbTip :: StandardTopLevelConfig -> FilePath -> IO (WithOrigin RemoteTipInfo)
+getImmDbTip cfg immDBDir = withRegistry $ \registry ->
+  ImmutableDB.withDB
+    (ImmutableDB.openDB (immDBArgs registry) runWithTempRegistry)
+    $ \immDB -> do
+      tip <- atomically $ ImmutableDB.getTip immDB
+      pure $ toRemoteTipInfo <$> tip
+ where
+  hasFS = fpToHasFS immDBDir
+  storageCfg = configStorage cfg
+  codecCfg = configCodec cfg
+  immDBArgs registry =
+    ImmutableDB.defaultArgs
+      { immCheckIntegrity = nodeCheckIntegrity storageCfg
+      , immChunkInfo = nodeImmutableDbChunkInfo storageCfg
+      , immCodecConfig = codecCfg
+      , immRegistry = registry
+      , immHasFS = SomeHasFS hasFS
+      }
+
+toRemoteTipInfo :: ImmutableDB.Tip StandardBlock -> RemoteTipInfo
+toRemoteTipInfo tip =
+  RemoteTipInfo
+    { rtiSlot = unSlotNo (ImmutableDB.tipSlotNo tip)
+    , rtiBlockNo = unBlockNo (ImmutableDB.tipBlockNo tip)
+    , rtiHashBytes = toRawHash (Proxy :: Proxy StandardBlock) (ImmutableDB.tipHash tip)
+    }

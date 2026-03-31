@@ -21,6 +21,7 @@ AWS credentials are read from the standard environment variables / credential ch
 | `--s3-region REGION` | `us-east-1` | AWS region |
 | `--poll-interval SECONDS` | `10` | How often to check for new chunks |
 | `--state-file PATH` | `<immutable-dir>/.chunk-uploader-state` | Upload progress state file |
+| `--config PATH` | *(none)* | Cardano node config file; enables automatic `tip.json` upload |
 
 ## How it works
 
@@ -28,6 +29,7 @@ AWS credentials are read from the standard environment variables / credential ch
 2. Uploads each completed chunk's three files (`.chunk`, `.primary`, `.secondary`) to the configured S3 bucket.
 3. Records the last successfully uploaded chunk number in a state file so it can resume without re-uploading.
 4. Retries failed uploads with exponential backoff.
+5. When `--config` is provided, generates and uploads `tip.json` to `<prefix>tip.json` after each batch of new chunks, reflecting the current ImmutableDB tip (slot, block number, and hash).
 
 ## License
 

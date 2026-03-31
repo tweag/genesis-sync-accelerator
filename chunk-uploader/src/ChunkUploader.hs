@@ -8,8 +8,9 @@ module ChunkUploader
   ( runUploader
   ) where
 
+import Cardano.Slotting.Slot (WithOrigin (..))
 import ChunkUploader.Detection (scanCompletedChunks)
-import ChunkUploader.S3 (S3Handle, credentialsWork, initS3, uploadChunkTriplet)
+import ChunkUploader.S3 (S3Handle, credentialsWork, initS3, uploadChunkTriplet, uploadTipJson)
 import ChunkUploader.State
   ( defaultStateFile
   , loadState
@@ -24,6 +25,8 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (SomeAsyncException (..), SomeException, fromException, throwIO, try)
 import Control.Monad (unless)
 import Data.Maybe (fromMaybe)
+import GenesisSyncAccelerator.Types (StandardTopLevelConfig)
+import GenesisSyncAccelerator.Util (getImmDbTip, getTopLevelConfig)
 import System.Exit (exitFailure)
 import "contra-tracer" Control.Tracer (Tracer, traceWith)
 
@@ -54,7 +57,10 @@ runUploader tracer cfg = do
   let stateFile = fromMaybe (defaultStateFile $ ucImmutableDir cfg) (ucStateFile cfg)
   lastUploaded <- loadState stateFile
   traceWith tracer (TraceStateLoaded lastUploaded)
-  loop tracer cfg s3 stateFile lastUploaded
+  mlTopLevelCfg <- case ucNodeConfig cfg of
+    Nothing -> pure Nothing
+    Just configPath -> Just <$> getTopLevelConfig configPath
+  loop tracer cfg s3 stateFile lastUploaded mlTopLevelCfg
 
 loop ::
   Tracer IO TraceUploaderEvent ->
@@ -62,8 +68,9 @@ loop ::
   S3Handle ->
   FilePath ->
   Maybe ChunkNo ->
+  Maybe StandardTopLevelConfig ->
   IO ()
-loop tracer cfg s3 stateFile lastUploaded = do
+loop tracer cfg s3 stateFile lastUploaded mlTopLevelCfg = do
   traceWith tracer TraceScanStart
   completed <- scanCompletedChunks (ucImmutableDir cfg)
   traceWith tracer (TraceScanComplete completed)
@@ -71,8 +78,13 @@ loop tracer cfg s3 stateFile lastUploaded = do
         Nothing -> completed
         Just n -> filter (> n) completed
   newLast <- uploadChunks tracer s3 cfg stateFile lastUploaded newChunks
+  case mlTopLevelCfg of
+    Just topLevelCfg
+      | newLast /= lastUploaded ->
+          uploadTip tracer s3 topLevelCfg (ucImmutableDir cfg)
+    _ -> pure ()
   threadDelay (ucPollInterval cfg * 1_000_000)
-  loop tracer cfg s3 stateFile newLast
+  loop tracer cfg s3 stateFile newLast mlTopLevelCfg
 
 uploadChunks ::
   Tracer IO TraceUploaderEvent ->
@@ -118,3 +130,22 @@ uploadChunkWithRetry tracer s3 cfg cn attempt = do
               traceWith tracer (TraceUploadRetry cn (attempt + 1))
               uploadChunkWithRetry tracer s3 cfg cn (attempt + 1)
             else pure False
+
+uploadTip ::
+  Tracer IO TraceUploaderEvent ->
+  S3Handle ->
+  StandardTopLevelConfig ->
+  FilePath ->
+  IO ()
+uploadTip tracer s3 topLevelCfg immDir = do
+  traceWith tracer TraceTipUploadStart
+  result <- try $ do
+    mTip <- getImmDbTip topLevelCfg immDir
+    case mTip of
+      Origin -> pure ()
+      At tip -> uploadTipJson s3 tip
+  case result of
+    Right () -> traceWith tracer TraceTipUploadSuccess
+    Left (e :: SomeException)
+      | Just (SomeAsyncException _) <- fromException e -> throwIO e
+      | otherwise -> traceWith tracer (TraceTipUploadFailure (show e))

@@ -4,6 +4,7 @@
 
 module Main (main) where
 
+import Cardano.Crypto.Init (cryptoInit)
 import ChunkUploader (runUploader)
 import ChunkUploader.Types
   ( TraceUploaderEvent
@@ -18,6 +19,7 @@ import "contra-tracer" Control.Tracer (Tracer, showTracing, stdoutTracer)
 main :: IO ()
 main = withStdTerminalHandles $ do
   hSetBuffering stdout LineBuffering
+  cryptoInit
   cfg <- execParser optsInfo
   let tracer :: Tracer IO TraceUploaderEvent
       tracer = showTracing stdoutTracer
@@ -90,6 +92,14 @@ optsParser = do
             <> metavar "PATH"
             <> help "Upload progress state file (default: <immutable-dir>/.chunk-uploader-state)"
         )
+  ucNodeConfig <-
+    optional $
+      strOption
+        ( long "config"
+            <> metavar "PATH"
+            <> help
+              "Path to the Cardano node config file. When provided, tip.json is generated and uploaded after each batch of new chunks."
+        )
   pure
     UploaderConfig
       { ucImmutableDir
@@ -99,4 +109,5 @@ optsParser = do
       , ucS3Region
       , ucPollInterval
       , ucStateFile
+      , ucNodeConfig
       }
