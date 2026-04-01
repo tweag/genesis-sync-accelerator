@@ -6,12 +6,7 @@ author: Modus Create, LLC.
 maintainer: cardano-gsa@tweag.io
 build-type: Simple
 
-executable chunk-uploader
-  main-is: Main.hs
-  hs-source-dirs:
-    app
-    src
-
+common warnings
   ghc-options:
     -Wall
     -Wcompat
@@ -24,6 +19,13 @@ executable chunk-uploader
     -Wunused-packages
     -threaded
     -rtsopts
+
+executable chunk-uploader
+  import: warnings
+  main-is: Main.hs
+  hs-source-dirs:
+    app
+    src
 
   other-modules:
     ChunkUploader
@@ -51,25 +53,13 @@ executable chunk-uploader
     with-utf8,
 
 test-suite chunk-uploader-tests
+  import: warnings
   main-is: Main.hs
   hs-source-dirs:
     src
     test
 
   type: exitcode-stdio-1.0
-  ghc-options:
-    -Wall
-    -Wcompat
-    -Wincomplete-uni-patterns
-    -Wincomplete-record-updates
-    -Wpartial-fields
-    -Widentities
-    -Wredundant-constraints
-    -Wmissing-export-lists
-    -Wunused-packages
-    -threaded
-    -rtsopts
-
   other-modules:
     ChunkUploader.Detection
     ChunkUploader.S3

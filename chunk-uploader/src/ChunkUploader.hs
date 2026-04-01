@@ -57,10 +57,10 @@ runUploader tracer cfg = do
   let stateFile = fromMaybe (defaultStateFile $ ucImmutableDir cfg) (ucStateFile cfg)
   lastUploaded <- loadState stateFile
   traceWith tracer (TraceStateLoaded lastUploaded)
-  mlTopLevelCfg <- case ucNodeConfig cfg of
+  mbTopLevelCfg <- case ucNodeConfig cfg of
     Nothing -> pure Nothing
     Just configPath -> Just <$> getTopLevelConfig configPath
-  loop tracer cfg s3 stateFile lastUploaded mlTopLevelCfg
+  loop tracer cfg s3 stateFile lastUploaded mbTopLevelCfg
 
 loop ::
   Tracer IO TraceUploaderEvent ->
@@ -70,7 +70,7 @@ loop ::
   Maybe ChunkNo ->
   Maybe StandardTopLevelConfig ->
   IO ()
-loop tracer cfg s3 stateFile lastUploaded mlTopLevelCfg = do
+loop tracer cfg s3 stateFile lastUploaded mbTopLevelCfg = do
   traceWith tracer TraceScanStart
   completed <- scanCompletedChunks (ucImmutableDir cfg)
   traceWith tracer (TraceScanComplete completed)
@@ -78,13 +78,13 @@ loop tracer cfg s3 stateFile lastUploaded mlTopLevelCfg = do
         Nothing -> completed
         Just n -> filter (> n) completed
   newLast <- uploadChunks tracer s3 cfg stateFile lastUploaded newChunks
-  case mlTopLevelCfg of
+  case mbTopLevelCfg of
     Just topLevelCfg
       | newLast /= lastUploaded ->
           uploadTip tracer s3 topLevelCfg (ucImmutableDir cfg)
     _ -> pure ()
   threadDelay (ucPollInterval cfg * 1_000_000)
-  loop tracer cfg s3 stateFile newLast mlTopLevelCfg
+  loop tracer cfg s3 stateFile newLast mbTopLevelCfg
 
 uploadChunks ::
   Tracer IO TraceUploaderEvent ->

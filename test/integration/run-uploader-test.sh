@@ -22,7 +22,7 @@
 #
 # Configuration via environment variables:
 #   MINIO_PORT       (default: 9000)  Port for the local MinIO server
-#   CHUNK_UPLOADER   (default: chunk-uploader)  Path to the binary
+#   CHUNK_UPLOADER_EXECUTABLE   (default: chunk-uploader)  Path to the binary
 #   DB_DIR           (default: ./test-data/source-db)  Source ImmutableDB
 
 set -euo pipefail
@@ -33,7 +33,7 @@ source "$SCRIPT_DIR/../lib.sh"
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 MINIO_PORT="${MINIO_PORT:-9000}"
-CHUNK_UPLOADER="${CHUNK_UPLOADER:-chunk-uploader}"
+CHUNK_UPLOADER_EXECUTABLE="${CHUNK_UPLOADER_EXECUTABLE:-chunk-uploader}"
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
 IMMUTABLE_SRC="$SOURCE_DB/immutable"
 BUCKET_NAME="test-bucket"
@@ -73,8 +73,8 @@ echo "${BOLD}=== Checking source data ===${NC}"
 MIN_CHUNKS=8
 MIN_CHUNKS="$MIN_CHUNKS" DB_DIR="$SOURCE_DB" bash "$SCRIPT_DIR/chain-init.sh"
 
-AVAILABLE=$(find "$IMMUTABLE_SRC" -name '*.chunk' | wc -l)
-echo "  Source has $AVAILABLE chunk(s) (need $MIN_CHUNKS)"
+NUM_CHUNKS_AVAILABLE=$(find "$IMMUTABLE_SRC" -name '*.chunk' | wc -l)
+echo "  Source has $NUM_CHUNKS_AVAILABLE chunk(s) (need $MIN_CHUNKS)"
 
 # ── Ephemeral workdir ─────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ start_uploader() {
   fi
 
   AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
-  stdbuf -oL "$CHUNK_UPLOADER" "${args[@]}" >"$log_file" 2>&1 &
+  stdbuf -oL "$CHUNK_UPLOADER_EXECUTABLE" "${args[@]}" >"$log_file" 2>&1 &
   echo $!
 }
 
