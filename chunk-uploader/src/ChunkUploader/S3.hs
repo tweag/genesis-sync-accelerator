@@ -8,7 +8,9 @@ module ChunkUploader.S3
   , credentialsWork
   , uploadChunkFile
   , uploadChunkTriplet
+  , uploadTipJson
   , chunkExistsOnS3
+  , parseEndpoint
   ) where
 
 import qualified Amazonka
@@ -20,9 +22,11 @@ import ChunkUploader.Types
   , chunkFileName
   )
 import Control.Exception (SomeAsyncException (..), SomeException, fromException, throwIO, try)
+import Data.Aeson (encode)
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
+import GenesisSyncAccelerator.RemoteStorage (RemoteTipInfo)
 import Network.HTTP.Client (parseRequest)
 import qualified Network.HTTP.Client as HTTP
 import System.FilePath ((</>))
@@ -115,6 +119,17 @@ parseEndpoint url =
             , HTTP.host req
             , HTTP.port req
             )
+
+-- | Serialise a 'RemoteTipInfo' to JSON and upload it as @tip.json@ under the
+-- configured prefix.
+uploadTipJson :: S3Handle -> RemoteTipInfo -> IO ()
+uploadTipJson h info = do
+  let key = S3.ObjectKey (s3Prefix h <> "tip.json")
+      body = Amazonka.toBody (encode info)
+      req = S3.newPutObject (s3Bucket h) key body
+  Amazonka.runResourceT $ do
+    _ <- Amazonka.send (s3Env h) req
+    pure ()
 
 -- | Check if a chunk's .chunk file already exists on S3.
 -- Used for startup reconciliation.

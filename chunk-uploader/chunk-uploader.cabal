@@ -6,12 +6,7 @@ author: Modus Create, LLC.
 maintainer: cardano-gsa@tweag.io
 build-type: Simple
 
-executable chunk-uploader
-  main-is: Main.hs
-  hs-source-dirs:
-    app
-    src
-
+common warnings
   ghc-options:
     -Wall
     -Wcompat
@@ -25,6 +20,13 @@ executable chunk-uploader
     -threaded
     -rtsopts
 
+executable chunk-uploader
+  import: warnings
+  main-is: Main.hs
+  hs-source-dirs:
+    app
+    src
+
   other-modules:
     ChunkUploader
     ChunkUploader.Detection
@@ -33,15 +35,53 @@ executable chunk-uploader
     ChunkUploader.Types
 
   build-depends:
+    aeson,
     amazonka,
     amazonka-s3,
     base,
     bytestring,
+    cardano-crypto-class,
+    cardano-slotting,
     contra-tracer,
     directory,
     filepath,
+    genesis-sync-accelerator,
     http-client,
     optparse-applicative,
     ouroboros-consensus,
     text,
     with-utf8,
+
+test-suite chunk-uploader-tests
+  import: warnings
+  main-is: Main.hs
+  hs-source-dirs:
+    src
+    test
+
+  type: exitcode-stdio-1.0
+  other-modules:
+    ChunkUploader.Detection
+    ChunkUploader.S3
+    ChunkUploader.State
+    ChunkUploader.Types
+    Test.ChunkUploader.Detection
+    Test.ChunkUploader.S3
+    Test.ChunkUploader.State
+    Test.ChunkUploader.Types
+
+  build-depends:
+    aeson,
+    amazonka,
+    amazonka-s3,
+    base,
+    bytestring,
+    directory,
+    filepath,
+    genesis-sync-accelerator,
+    http-client,
+    ouroboros-consensus,
+    tasty,
+    tasty-hunit,
+    temporary,
+    text,

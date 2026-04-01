@@ -98,12 +98,8 @@ executable immdb-get-tip
     base,
     cardano-crypto-class,
     contra-tracer,
-    fs-api,
     genesis-sync-accelerator,
     optparse-applicative,
-    ouroboros-consensus,
-    ouroboros-consensus-cardano:{unstable-cardano-tools},
-    resource-registry,
     with-utf8,
 
 library
