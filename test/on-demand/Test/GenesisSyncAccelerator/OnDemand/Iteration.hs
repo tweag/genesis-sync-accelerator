@@ -11,7 +11,8 @@ module Test.GenesisSyncAccelerator.OnDemand.Iteration (tests) where
 import Cardano.Slotting.Slot (SlotNo (..))
 import qualified Codec.CBOR.Write as CBOR
 import Codec.Serialise (Serialise (encode))
-import Control.Monad (forM_)
+import Control.Exception (try)
+import Control.Monad (forM_, when)
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
 import qualified Data.List as List
@@ -87,7 +88,7 @@ import "contra-tracer" Control.Tracer (nullTracer)
 
 prop_fullIterationOverChainHeadersRecapitulatesInput :: Property
 prop_fullIterationOverChainHeadersRecapitulatesInput =
-  noShrinking $ forAll genBlocksAndChunkSize $ \(blocks, chunkSize) ->
+  forAll genBlocksAndChunkSize $ \(blocks, chunkSize) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
@@ -127,7 +128,7 @@ prop_fullIterationOverChainHeadersRecapitulatesInput =
 
 prop_onDemandIteratorFromIsCorrectForStreamFromInclusive :: Property
 prop_onDemandIteratorFromIsCorrectForStreamFromInclusive =
-  noShrinking $ forAll (genBlocksAndChunkSize >>= (\(bs, sz) -> (bs,sz,) <$> chooseInt (0, length bs - 1))) $ \(blocks, chunkSize, startIndex) ->
+  forAll (genBlocksAndChunkSize >>= (\(bs, sz) -> (bs,sz,) <$> chooseInt (0, length bs - 1))) $ \(blocks, chunkSize, startIndex) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
@@ -162,12 +163,12 @@ prop_onDemandIteratorFromIsCorrectForStreamFromInclusive =
           OnDemand.onDemandIteratorFrom
             runtime
             GetHash
-            (StreamFromInclusive $ blockRealPoint (blocks !! startIndex))
+            (StreamFromInclusive . blockRealPoint $ blocks !! startIndex)
         (\hs -> hs === map blockHash (drop startIndex blocks)) <$> iteratorToList iter
 
 prop_onDemandIteratorFromIsCorrectForStreamFromExclusive :: Property
 prop_onDemandIteratorFromIsCorrectForStreamFromExclusive =
-  noShrinking $ forAll (genBlocksAndChunkSize >>= (\(bs, sz) -> (bs,sz,) <$> chooseInt (0, length bs - 1))) $ \(blocks, chunkSize, startIndex) ->
+  forAll (genBlocksAndChunkSize >>= (\(bs, sz) -> (bs,sz,) <$> chooseInt (0, length bs - 1))) $ \(blocks, chunkSize, startIndex) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
@@ -206,9 +207,9 @@ prop_onDemandIteratorFromIsCorrectForStreamFromExclusive =
             (StreamFromExclusive startPoint)
         (\hs -> hs === map blockHash (drop (startIndex + 1) blocks)) <$> iteratorToList iter
 
-prop_onDemandIteratorFromIsEmptyWhenStartingFromAfterLastBlock :: Property
-prop_onDemandIteratorFromIsEmptyWhenStartingFromAfterLastBlock =
-  noShrinking $ forAll genBlocksAndChunkSize $ \(blocks, chunkSize) ->
+prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock :: Property
+prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock =
+  forAll genBlocksAndChunkSize $ \(blocks, chunkSize@ChunkSize{..}) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
@@ -219,7 +220,8 @@ prop_onDemandIteratorFromIsEmptyWhenStartingFromAfterLastBlock =
                 )
                 Map.empty
                 blocks
-        forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
+            maxChunk = maximum (Map.keys chunkedBlocks)
+        forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
           let cfg =
                 OnDemandConfig
@@ -239,25 +241,22 @@ prop_onDemandIteratorFromIsEmptyWhenStartingFromAfterLastBlock =
           writeTVar
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
-        let lastBlock = last blocks
-        iterFromInclusive <-
-          OnDemand.onDemandIteratorFrom
-            runtime
-            GetHash
-            (StreamFromInclusive $ blockRealPoint $ incrementSlot lastBlock)
-        iterFromExclusive <-
-          OnDemand.onDemandIteratorFrom
-            runtime
-            GetHash
-            (StreamFromExclusive $ blockPoint lastBlock)
-        props <- traverse (fmap (=== []) . iteratorToList) [iterFromInclusive, iterFromExclusive]
-        return $ conjoin props
+        let afterLastBlock = incrementSlot $ last blocks
+            afterLastBlockRawChunk = unSlotNo (blockSlot afterLastBlock) `div` numRegularBlocks
+            streamBound = StreamFromInclusive $ blockRealPoint afterLastBlock
+            expErr =
+              if afterLastBlockRawChunk > unChunkNo maxChunk
+                then OnDemand.FirstChunkNotAvailable streamBound (ChunkNo afterLastBlockRawChunk)
+                else OnDemand.StreamBoundNotFound (blockSlot afterLastBlock, blockHash afterLastBlock) Nothing
+        checkIterWithStreamFromFails runtime (=== expErr) streamBound
 
-prop_onDemandIteratorFromIsCorrectWhenStartingBetweenSlotNumbersWithinChain :: Property
-prop_onDemandIteratorFromIsCorrectWhenStartingBetweenSlotNumbersWithinChain =
-  noShrinking $ forAll myGen $ \(blocks, chunkSize, nonExistentBlock) ->
+prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain :: Property
+prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
+  forAll myGen $ \(blocks, chunkSize, nonExistentBlock) ->
     ioProperty $
       withTemp $ \tmp -> do
+        when (blockSlot nonExistentBlock `elem` map blockSlot blocks) $
+          error "Precondition violation: generated start block with slot already in use"
         let chunkInfo = UniformChunkSize chunkSize
             chunkedBlocks =
               foldr
@@ -286,24 +285,23 @@ prop_onDemandIteratorFromIsCorrectWhenStartingBetweenSlotNumbersWithinChain =
           writeTVar
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
-        iterFromInclusive <-
-          OnDemand.onDemandIteratorFrom
-            runtime
-            GetHash
-            (StreamFromInclusive $ blockRealPoint nonExistentBlock)
-        iterFromExclusive <-
-          OnDemand.onDemandIteratorFrom
-            runtime
-            GetHash
-            (StreamFromExclusive $ blockPoint nonExistentBlock)
-        let expHeaders = map blockHash $ dropWhile (\b -> blockSlot b < blockSlot nonExistentBlock) blocks
-        props <- traverse (fmap (=== expHeaders) . iteratorToList) [iterFromInclusive, iterFromExclusive]
-        return $ conjoin props
+        let checkError (OnDemand.StreamBoundNotFound (s, h) _) =
+              conjoin
+                [ s === blockSlot nonExistentBlock
+                , h === blockHash nonExistentBlock
+                ]
+            checkError e = counterexample ("Expected StreamBoundNotFound error but got different error: " ++ show e) False
+        conjoin
+          <$> traverse
+            (checkIterWithStreamFromFails runtime checkError)
+            [ StreamFromExclusive $ blockPoint nonExistentBlock
+            , StreamFromInclusive $ blockRealPoint nonExistentBlock
+            ]
  where
   myGen = do
     let offset xs = zip (drop 1 xs) xs
         getSlots = map blockSlot
-        getDiffs = map (\(b, a) -> b - a) . offset
+        getDiffs = map (uncurry (-)) . offset
     (bs, sz) <- genBlocksAndChunkSize `suchThat` (\(bs, _) -> any (> 1) (getDiffs $ getSlots bs))
     let slotOptions = concatMap (\(b, a) -> if b - a <= 1 then [] else [(a + 1) .. (b - 1)]) $ offset $ getSlots bs
     case slotOptions of
@@ -316,11 +314,19 @@ prop_onDemandIteratorFromIsCorrectWhenStartingBetweenSlotNumbersWithinChain =
         extraValid <- arbitrary
         return (bs, sz, unsafeTestBlock extraHash extraSlot extraValid)
 
-prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeaderHash :: Property
-prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeaderHash =
-  noShrinking $ forAll myGen $ \(blocks, chunkSize, nonExistentBlock, blockChangedIndex) ->
+prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHash :: Property
+prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHash =
+  forAll myGen $ \(blocks, chunkSize, nonExistentBlock) ->
     ioProperty $
       withTemp $ \tmp -> do
+        case blockHash <$> List.find (\b -> blockSlot b == blockSlot nonExistentBlock) blocks of
+          Nothing ->
+            error
+              "Precondition violation: generated start block with slot number not present among other blocks"
+          Just h ->
+            when (h == blockHash nonExistentBlock) $
+              error
+                "Precondition violation: generated start block with used slot but same header hash as already present there"
         let chunkInfo = UniformChunkSize chunkSize
             chunkedBlocks =
               foldr
@@ -349,32 +355,25 @@ prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeade
           writeTVar
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
-        obsFromInclusive <-
-          OnDemand.onDemandIteratorFrom
-            runtime
-            GetHash
-            (StreamFromInclusive $ blockRealPoint nonExistentBlock)
-            >>= iteratorToList
-        obsFromExclusive <-
-          OnDemand.onDemandIteratorFrom
-            runtime
-            GetHash
-            (StreamFromExclusive $ blockPoint nonExistentBlock)
-            >>= iteratorToList
-        let hashes = map blockHash blocks
-        return $
-          conjoin
-            [ obsFromInclusive === drop (blockChangedIndex + 1) hashes
-            , obsFromExclusive === drop blockChangedIndex hashes
+        let checkError (OnDemand.StreamBoundNotFound (s, h) (Just _)) =
+              conjoin
+                [ s === blockSlot nonExistentBlock
+                , h === blockHash nonExistentBlock
+                ]
+            checkError e = counterexample ("Expected StreamBoundNotFound error but got different error: " ++ show e) False
+        conjoin
+          <$> traverse
+            (checkIterWithStreamFromFails runtime checkError)
+            [ StreamFromExclusive (blockPoint nonExistentBlock)
+            , StreamFromInclusive (blockRealPoint nonExistentBlock)
             ]
  where
   myGen = do
     (bs, sz) <- genBlocksAndChunkSize
-    blockIndex <- chooseInt (0, length bs - 1)
-    let b = bs !! blockIndex
+    b <- (bs !!) <$> chooseInt (0, length bs - 1)
     newHash <- arbitrary `suchThat` (/= blockHash b)
     let newBlock = unsafeTestBlock newHash (blockSlot b) (tbValid b)
-    return $ (bs, sz, newBlock, blockIndex)
+    return (bs, sz, newBlock)
 
 instance Arbitrary SlotNo where
   arbitrary = SlotNo <$> arbitrary
@@ -403,6 +402,17 @@ buildSecondaryEntry offset checksum block =
         , headerHash = tipHash tip
         , blockOrEBB = Block (tipSlotNo tip)
         }
+
+checkIterWithStreamFromFails ::
+  OnDemandRuntime IO TestBlock h ->
+  (OnDemand.IllegalStreamResult TestBlock -> Property) ->
+  StreamFrom TestBlock ->
+  IO Property
+checkIterWithStreamFromFails runtime checkError streamBound =
+  either checkError (const $ counterexample "Expected error but none occurred" False)
+    <$> ( try (OnDemand.onDemandIteratorFrom runtime (GetPure ()) streamBound >>= iteratorToList) ::
+            IO (Either (OnDemand.IllegalStreamResult TestBlock) [()])
+        )
 
 genBlocks :: Int -> Gen [TestBlock]
 genBlocks n = do
@@ -500,12 +510,12 @@ tests =
         "onDemandIteratorFrom is correct when using StreamFromExclusive for an extant point"
         prop_onDemandIteratorFromIsCorrectForStreamFromExclusive
     , testProperty
-        "onDemandIteratorFrom is correct when starting from a point between slot numbers within chain"
-        prop_onDemandIteratorFromIsCorrectWhenStartingBetweenSlotNumbersWithinChain
+        "onDemandIteratorFrom errors when starting from a point between slot numbers within chain"
+        prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain
     , testProperty
-        "onDemandIteratorFrom is correct when starting from a point with a slot number on chain but wrong header hash"
-        prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeaderHash
+        "onDemandIteratorFrom errors when starting from a point with a slot number on chain but wrong header hash"
+        prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHash
     , testProperty
-        "onDemandIteratorFrom is empty when starting from after the last block"
-        prop_onDemandIteratorFromIsEmptyWhenStartingFromAfterLastBlock
+        "onDemandIteratorFrom errors when starting from after the last block"
+        prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock
     ]

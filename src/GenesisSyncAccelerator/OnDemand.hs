@@ -16,7 +16,8 @@
 -- This module provides streaming helpers that download missing chunks from a CDN
 -- and serve them using local iterators that read directly from downloaded files.
 module GenesisSyncAccelerator.OnDemand
-  ( OnDemandConfig (..)
+  ( IllegalStreamResult (..)
+  , OnDemandConfig (..)
   , OnDemandRuntime (..)
   , OnDemandTip (..)
   , OnDemandState (..)
@@ -30,20 +31,25 @@ module GenesisSyncAccelerator.OnDemand
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
-import Control.Monad (unless, void)
+import Control.Exception (Exception, throw)
+import Control.Monad (unless, void, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.Bifunctor as Bifunctor
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
 import qualified Data.List.NonEmpty as NEL
 import qualified Data.Map.Strict as Map
+import Data.Maybe (listToMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
+import GenesisSyncAccelerator.Util (getEntrySlot)
 import qualified Network.HTTP.Client as HTTP
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
@@ -204,8 +210,7 @@ onDemandIteratorForRange ::
   StreamFrom blk ->
   StreamTo blk ->
   m (Iterator m blk b)
-onDemandIteratorForRange odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcChunkInfo}} component from to =
-  mkOnDemandIterator odr component from (Just to) (getChunksInRange odcChunkInfo from to)
+onDemandIteratorForRange odr component from to = mkOnDemandIterator odr component from (Just to)
 
 onDemandIteratorFrom ::
   forall m blk h b.
@@ -221,8 +226,7 @@ onDemandIteratorFrom ::
   BlockComponent blk b ->
   StreamFrom blk ->
   m (Iterator m blk b)
-onDemandIteratorFrom odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcChunkInfo}} component from =
-  mkOnDemandIterator odr component from Nothing (chunksFrom odcChunkInfo from)
+onDemandIteratorFrom odr component from = mkOnDemandIterator odr component from Nothing
 
 readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
 readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
@@ -254,9 +258,10 @@ mkOnDemandIterator ::
   ) =>
   OnDemandRuntime m blk h ->
   BlockComponent blk b ->
+  -- | Iterator start: entries at or after this point are included.
+  -- Note that bound behavior depends on the constructor being used (StreamFromInclusive vs StreamFromExclusive).
   StreamFrom blk ->
   Maybe (StreamTo blk) ->
-  NEL.NonEmpty ChunkNo ->
   m (Iterator m blk b)
 mkOnDemandIterator
   odr@OnDemandRuntime
@@ -274,15 +279,39 @@ mkOnDemandIterator
     }
   component
   from
-  to
-  chunks = do
+  mbTo = do
+    let applyTo :: ChunkNo -> [SizedEntry blk] -> Either (IllegalStreamResult blk) [SizedEntry blk]
+        (chunks, applyTo) = case mbTo of
+          Nothing -> (chunksFrom odcChunkInfo from, \_ es -> Right es)
+          Just to@(StreamToInclusive (RealPoint toSlot toHash)) ->
+            let cs = getChunksInRange odcChunkInfo from to
+                c' = NEL.last cs
+             in ( cs
+                , \c es ->
+                    if c == c'
+                      then
+                        checkEntryMatch
+                          odcChunkInfo
+                          toSlot
+                          toHash
+                          (\entries -> if null entries then Nothing else Just (last entries))
+                          (takeWhile (\(WithBlockSize _ e) -> getEntrySlot odcChunkInfo e <= toSlot) es)
+                      else Right es
+                )
+        applyFrom :: ChunkNo -> [SizedEntry blk] -> Either (IllegalStreamResult blk) [SizedEntry blk]
+        applyFrom c es = if c == NEL.head chunks then finalizeFrom <$> validateFrom (getFrom es) else Right es
+         where
+          dropInit fromSlot = dropWhile $ \(WithBlockSize _ e) -> getEntrySlot odcChunkInfo e < fromSlot
+          (getFrom, validateFrom, finalizeFrom) = case from of
+            StreamFromExclusive GenesisPoint -> (id, Right, id)
+            StreamFromExclusive (BlockPoint fromSlot fromHash) -> (dropInit fromSlot, checkEntryMatch odcChunkInfo fromSlot fromHash listToMaybe, drop 1)
+            StreamFromInclusive (RealPoint fromSlot fromHash) -> (dropInit fromSlot, checkEntryMatch odcChunkInfo fromSlot fromHash listToMaybe, id)
+
+    -- Initialize state for chunks left to process and the current chunk iterator.
     varChunks <- newTVarIO $ NEL.toList chunks
     varCurrentIt <- newTVarIO Nothing
-    {-
-     Track the current prefetch window in a TVar so that chunks can get unpinned:
-     - when the iterator moves forward
-     - or when the iterator is closed (e.g. on exception)
-    -}
+
+    -- Track current prefetch window so chunks can get unpinned when the iterator moves forward or is closed (e.g. on exception).
     varPrefetchWindow <- newTVarIO []
 
     let
@@ -369,6 +398,7 @@ mkOnDemandIterator
                   if not ok
                     then do
                       cleanupOnError
+                      when (c == NEL.head chunks) $ throw (FirstChunkNotAvailable from c)
                       return IteratorExhausted
                     else do
                       it <-
@@ -378,8 +408,8 @@ mkOnDemandIterator
                           odcCodecConfig
                           odcCheckIntegrity
                           component
-                          from
-                          to
+                          (applyFrom c)
+                          (applyTo c)
                           c
                       atomically $ writeTVar varCurrentIt (Just it)
                       next -- Transition to next chunk
@@ -529,15 +559,14 @@ mkRawBlockIterator ::
   (blk -> Bool) ->
   -- | The component of the block to stream (e.g., the whole block, just the header, etc.).
   BlockComponent blk b ->
-  -- | Stream lower bound: entries at or after this point are streamed.
-  -- Note that inclusivity depends on the constructor being used (StreamFromInclusive vs StreamFromExclusive).
-  StreamFrom blk ->
-  -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
-  Maybe (StreamTo blk) ->
+  -- | Application of the stream lower bound
+  ([SizedEntry blk] -> Either (IllegalStreamResult blk) [SizedEntry blk]) ->
+  -- | Application of the stream upper bound
+  ([SizedEntry blk] -> Either (IllegalStreamResult blk) [SizedEntry blk]) ->
   -- | The chunk from which to read blocks.
   ChunkNo ->
   m (Iterator m blk b)
-mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunk = do
+mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component applyFrom applyTo chunk = do
   -- 1. Read all entries from the requested chunks.
   allEntries <- do
     chunkSize <- withFile hasFS (fsPathChunkFile chunk) ReadMode (hGetSize hasFS)
@@ -547,10 +576,7 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
     let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
     Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
 
-  let flatEntries =
-        maybe id (applyStreamTo chunkInfo) to
-          . applyStreamFrom chunkInfo from
-          $ allEntries
+  let flatEntries = either throw id (applyFrom allEntries >>= applyTo)
   varEntries <- newTVarIO flatEntries
   varHandle <- newTVarIO (Nothing :: Maybe (Handle h))
 
@@ -623,42 +649,31 @@ chunksFrom ci from = NEL.iterate nextChunk (chunkForFrom ci from)
  where
   nextChunk (ChunkNo n) = ChunkNo (n + 1)
 
--- | Filter entries to honour the 'StreamFrom' lower bound.
---
--- For 'StreamFromExclusive pt', drops entries at or before @pt@.
--- For 'StreamFromInclusive pt', drops entries strictly before @pt@.
--- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
--- so a simple 'dropWhile' from the front suffices.
-applyStreamFrom ::
+-- | When something goes wrong obtaining a stream over blocks
+data IllegalStreamResult blk
+  = StreamBoundNotFound (SlotNo, HeaderHash blk) (Maybe (Entry blk))
+  | FirstChunkNotAvailable (StreamFrom blk) ChunkNo
+  deriving (Eq, Show)
+
+deriving instance (StandardHash blk, Typeable blk) => Exception (IllegalStreamResult blk)
+
+type SizedEntry blk = WithBlockSize (Entry blk)
+
+checkEntryMatch ::
   Eq (HeaderHash blk) =>
   ChunkInfo ->
-  StreamFrom blk ->
-  [WithBlockSize (Entry blk)] ->
-  [WithBlockSize (Entry blk)]
-applyStreamFrom ci = \case
-  StreamFromExclusive GenesisPoint -> id
-  StreamFromExclusive (BlockPoint fromSlot fromHash) ->
-    dropWhile $ \(WithBlockSize _ e) ->
-      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
-       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e == fromHash)
-  StreamFromInclusive (RealPoint fromSlot fromHash) ->
-    dropWhile $ \(WithBlockSize _ e) ->
-      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
-       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
-
--- | Filter entries to honour the 'StreamTo' upper bound.
---
--- For 'StreamToInclusive pt', takes entries up to and including @pt@.
--- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
--- so a simple 'takeWhile' from the front suffices.
-applyStreamTo ::
-  ChunkInfo ->
-  StreamTo blk ->
-  [WithBlockSize (Entry blk)] ->
-  [WithBlockSize (Entry blk)]
-applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
-  takeWhile $ \(WithBlockSize _ e) ->
-    ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
+  SlotNo ->
+  HeaderHash blk ->
+  ([SizedEntry blk] -> Maybe (SizedEntry blk)) ->
+  [SizedEntry blk] ->
+  Either (IllegalStreamResult blk) [SizedEntry blk]
+checkEntryMatch ci s h getE es =
+  Bifunctor.first (StreamBoundNotFound (s, h)) $
+    maybe
+      (Left Nothing)
+      ( \(WithBlockSize _ e) -> if (getEntrySlot ci e, headerHash e) == (s, h) then Right es else Left (Just e)
+      )
+      (getE es)
 
 tipFromRemoteEnv ::
   forall blk.

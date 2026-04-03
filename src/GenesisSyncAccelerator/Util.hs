@@ -1,4 +1,4 @@
-module GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig, getImmDbTip) where
+module GenesisSyncAccelerator.Util (fpToHasFS, getEntrySlot, getTopLevelConfig, getImmDbTip) where
 
 import qualified Cardano.Tools.DBAnalyser.Block.Cardano as Cardano
 import Cardano.Tools.DBAnalyser.HasAnalysis (mkProtocolInfo)
@@ -20,13 +20,19 @@ import Ouroboros.Consensus.Node.InitStorage
 import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
 import Ouroboros.Consensus.Storage.ImmutableDB (ImmutableDbArgs (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB as ImmutableDB
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
+import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
+import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import System.FS.API (HasFS, SomeHasFS (..))
-import System.FS.API.Types (MountPoint (MountPoint))
 import System.FS.IO (HandleIO, ioHasFS)
+import System.FS.API.Types (MountPoint (MountPoint))
 
 -- | Lift a filepath to a commonly used member of 'HasFS'.
 fpToHasFS :: FilePath -> HasFS IO HandleIO
 fpToHasFS = ioHasFS . MountPoint
+
+getEntrySlot :: ChunkInfo -> Entry blk -> SlotNo
+getEntrySlot ci = ChunkLayout.slotNoOfBlockOrEBB ci . blockOrEBB
 
 -- | From the given config file, get a 'TopLevelConfig' for a standard Cardano block.
 getTopLevelConfig :: FilePath -> IO StandardTopLevelConfig
