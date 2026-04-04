@@ -34,6 +34,9 @@ import Ouroboros.Consensus.Block.Abstract
   ( ConvertRawHash
   , GetHeader (..)
   , Point (GenesisPoint)
+  , blockHash
+  , blockPoint
+  , blockSlot
   )
 import Ouroboros.Consensus.Block.RealPoint (blockRealPoint)
 import Ouroboros.Consensus.Storage.Common
@@ -48,8 +51,8 @@ import Ouroboros.Consensus.Storage.ImmutableDB.API
   , blockToTip
   , tipHash
   )
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkSize (..))
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo (..), ChunkNo (..))
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo (..), ChunkSize (..))
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Primary as Primary (mk, write)
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary
@@ -65,7 +68,6 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (BlockOrEBB (..))
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util (fsPathChunkFile, fsPathPrimaryIndexFile)
 import Ouroboros.Consensus.Storage.Serialisation (HasBinaryBlockInfo (..))
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (readTVarIO, writeTVar)
-import Ouroboros.Network.Block (blockHash, blockPoint, blockSlot)
 import System.FS.API (AllowExisting (MustBeNew), HasFS, OpenMode (..), withFile)
 import System.FS.API.Types (Handle)
 import System.FS.CRC (CRC, hPutAllCRC)

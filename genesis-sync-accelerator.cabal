@@ -253,7 +253,6 @@ test-suite on-demand-tests
     ouroboros-consensus,
     ouroboros-consensus:unstable-consensus-testlib,
     ouroboros-consensus-cardano,
-    ouroboros-network-api,
     serialise,
     strict-checked-vars,
     tasty,
