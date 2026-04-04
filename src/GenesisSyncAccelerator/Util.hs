@@ -31,6 +31,7 @@ import System.FS.API.Types (MountPoint (MountPoint))
 fpToHasFS :: FilePath -> HasFS IO HandleIO
 fpToHasFS = ioHasFS . MountPoint
 
+-- | Get the given entry's slot number.
 getEntrySlot :: ChunkInfo -> Entry blk -> SlotNo
 getEntrySlot ci = ChunkLayout.slotNoOfBlockOrEBB ci . blockOrEBB
 

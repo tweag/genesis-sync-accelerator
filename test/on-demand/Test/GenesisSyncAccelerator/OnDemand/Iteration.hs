@@ -73,7 +73,7 @@ import System.FS.API.Types (Handle)
 import System.FS.CRC (CRC, hPutAllCRC)
 import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
-import Test.GenesisSyncAccelerator.Utilities (getLocalUrl)
+import Test.GenesisSyncAccelerator.Utilities (getBlockChunk, getLocalUrl)
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
@@ -97,7 +97,7 @@ prop_fullIterationOverChainHeadersRecapitulatesInput =
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -137,7 +137,7 @@ prop_onDemandIteratorFromIsCorrectForStreamFromInclusive =
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -177,7 +177,7 @@ prop_onDemandIteratorFromIsCorrectForStreamFromExclusive =
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -218,7 +218,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk 
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -261,7 +261,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockButWithinSameChun
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -315,7 +315,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -340,8 +340,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
           writeTVar
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
-        let extraBlockChunk = ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot extraBlock)
-            getExpErr bound = OnDemand.FirstChunkNotAvailable bound extraBlockChunk
+        let getExpErr bound = OnDemand.FirstChunkNotAvailable bound (getBlockChunk chunkInfo extraBlock)
         conjoin
           <$> traverse
             ( \buildBound -> let b = buildBound extraBlock in checkIterWithStreamFromFails runtime (=== getExpErr b) b
@@ -368,7 +367,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk =
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -428,7 +427,7 @@ prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -498,7 +497,7 @@ prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHa
             chunkedBlocks =
               foldr
                 ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
                 )
                 Map.empty
                 blocks
@@ -605,7 +604,7 @@ genUniqueHashes :: Int -> Gen [TestHash]
 genUniqueHashes n = map (\h -> testHashFromList [fromIntegral h]) <$> shuffle [1 .. n]
 
 getMinChunk :: ChunkSize -> [TestBlock] -> ChunkNo
-getMinChunk chunkSize = ChunkLayout.chunkIndexOfSlot (UniformChunkSize chunkSize) . minimum . map blockSlot
+getMinChunk chunkSize = minimum . map (getBlockChunk (UniformChunkSize chunkSize))
 
 incrementSlot :: TestBlock -> TestBlock
 incrementSlot b = unsafeTestBlock (SlotNo $ 1 + unSlotNo (blockSlot b)) (blockHash b) (tbValid b)

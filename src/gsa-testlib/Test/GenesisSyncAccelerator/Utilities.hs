@@ -8,6 +8,7 @@ module Test.GenesisSyncAccelerator.Utilities
   , currentFileTypes
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
+  , getBlockChunk
   , getCurrentFilenamesForChunk
   , getLocalUrl
   , getTopLevelConfigFilePath
@@ -24,8 +25,12 @@ import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (Port, testWithApplication)
+import Ouroboros.Consensus.Block (HasHeader)
+import Ouroboros.Consensus.Block.Abstract (blockSlot)
 import Ouroboros.Consensus.Config (configCodec)
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
+import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
 import Paths_genesis_sync_accelerator (getDataFileName)
 import System.FS.IO (HandleIO)
 import System.FilePath ((</>))
@@ -56,6 +61,10 @@ genSeveralChunkNumbers = do
 -- | Get the name of each file possibly associated with a chunk.
 getAllFilenamesForChunk :: ChunkNo -> [String]
 getAllFilenamesForChunk cn = getFilenamesForChunk cn allFileTypes
+
+-- | Get the chunk number for the given block
+getBlockChunk :: HasHeader blk => ChunkInfo -> blk -> ChunkNo
+getBlockChunk ci = ChunkLayout.chunkIndexOfSlot ci . blockSlot
 
 -- | List the name of each file currently expected to be associated with a chunk.
 getCurrentFilenamesForChunk :: ChunkNo -> [String]
