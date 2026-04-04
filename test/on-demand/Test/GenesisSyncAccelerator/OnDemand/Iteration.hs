@@ -250,6 +250,60 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk 
   thereIsRoomForOneMoreSlotInFinalChunk blocks ChunkSize{numRegularBlocks = slotsPerChunk} =
     maximum (map (unSlotNo . blockSlot) blocks) `mod` slotsPerChunk < (slotsPerChunk - 1)
 
+prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockButWithinSameChunk :: Property
+prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockButWithinSameChunk =
+  forAll myGen $ \(blocks, chunkSize, badBlock) ->
+    ioProperty $
+      withTemp $ \tmp -> do
+        let chunkInfo = UniformChunkSize chunkSize
+            chunkedBlocks =
+              foldr
+                ( \b acc ->
+                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                )
+                Map.empty
+                blocks
+            maxChunk = maximum (Map.keys chunkedBlocks)
+        forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
+        runtime <-
+          let cfg =
+                OnDemandConfig
+                  { odcRemote =
+                      RemoteStorageConfig{rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int)), rscDstDir = tmp}
+                  , odcTracer = nullTracer
+                  , odcChunkInfo = chunkInfo
+                  , odcHasFS = fpToHasFS tmp
+                  , odcCodecConfig = TB.TestBlockCodecConfig
+                  , odcCheckIntegrity = const True
+                  , odcMaxCachedChunks = MaxCachedChunksCount . fromIntegral $ Map.size chunkedBlocks
+                  , odcPrefetchAhead = PrefetchChunksCount 0
+                  }
+           in OnDemand.newOnDemandRuntime cfg
+        state <- readTVarIO $ odrState runtime
+        atomically $
+          writeTVar
+            (odrState runtime)
+            state{odsCachedChunks = Map.keysSet chunkedBlocks}
+        let checkError (OnDemand.StreamBoundNotFound (s, h) _) = conjoin [s === blockSlot badBlock, h === blockHash badBlock]
+            checkError e = counterexample ("Expected StreamBoundNotFound error; got: " ++ show e) False
+        conjoin
+          <$> traverse
+            (\buildBound -> checkIterWithStreamFromFails runtime checkError $ buildBound badBlock)
+            [StreamFromExclusive . blockPoint, StreamFromInclusive . blockRealPoint]
+ where
+  myGen = do
+    (bs, sz@ChunkSize{numRegularBlocks = numSlotsPerChunk}) <-
+      genBlocksAndChunkSize
+        `suchThat` ( \(bs, ChunkSize{numRegularBlocks = numSlotsPerChunk}) -> minimum (map (unSlotNo . blockSlot) bs) `mod` numSlotsPerChunk /= 0
+                   )
+    let leastChunk = getMinChunk sz bs
+        minSlotRaw = unChunkNo leastChunk * numSlotsPerChunk
+        maxSlotRaw = minimum (map (unSlotNo . blockSlot) bs) - 1
+    slot <- SlotNo <$> choose (minSlotRaw, maxSlotRaw)
+    hash <- arbitrary
+    valid <- arbitrary
+    return (bs, sz, unsafeTestBlock slot hash valid)
+
 prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk :: Property
 prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
   forAll myGen $ \(blocks, chunkSize, extraBlock) ->
@@ -299,6 +353,64 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
         firstSlotBeyondLastChunk = (1 + unChunkNo greatestChunk) * numSlotsPerChunk
     slot <-
       SlotNo <$> choose (firstSlotBeyondLastChunk, firstSlotBeyondLastChunk + 3 * numSlotsPerChunk)
+    hash <- arbitrary
+    valid <- arbitrary
+    return (bs, sz, unsafeTestBlock slot hash valid)
+
+prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk :: Property
+prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk =
+  forAll myGen $ \(blocks, chunkSize, badBlock) ->
+    ioProperty $
+      withTemp $ \tmp -> do
+        let chunkInfo = UniformChunkSize chunkSize
+            chunkedBlocks =
+              foldr
+                ( \b acc ->
+                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                )
+                Map.empty
+                blocks
+            maxChunk = maximum (Map.keys chunkedBlocks)
+        forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
+        runtime <-
+          let cfg =
+                OnDemandConfig
+                  { odcRemote =
+                      RemoteStorageConfig{rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int)), rscDstDir = tmp}
+                  , odcTracer = nullTracer
+                  , odcChunkInfo = chunkInfo
+                  , odcHasFS = fpToHasFS tmp
+                  , odcCodecConfig = TB.TestBlockCodecConfig
+                  , odcCheckIntegrity = const True
+                  , odcMaxCachedChunks = MaxCachedChunksCount . fromIntegral $ Map.size chunkedBlocks
+                  , odcPrefetchAhead = PrefetchChunksCount 0
+                  }
+           in OnDemand.newOnDemandRuntime cfg
+        state <- readTVarIO $ odrState runtime
+        atomically $
+          writeTVar
+            (odrState runtime)
+            state{odsCachedChunks = Map.keysSet chunkedBlocks}
+        let badBlockChunk = ChunkLayout.chunkIndexOfSlot chunkInfo $ blockSlot badBlock
+            getExpErr bound = OnDemand.FirstChunkNotAvailable bound badBlockChunk
+        conjoin
+          <$> traverse
+            ( \buildBound -> let b = buildBound badBlock in checkIterWithStreamFromFails runtime (=== getExpErr b) b
+            )
+            [StreamFromExclusive . blockPoint, StreamFromInclusive . blockRealPoint]
+ where
+  genWithSpace = do
+    (bs, sz) <- genBlocksAndChunkSize
+    if null $
+      dropWhile
+        (\b -> unChunkNo (ChunkLayout.chunkIndexOfSlot (UniformChunkSize sz) (blockSlot b)) < 1)
+        bs
+      then genWithSpace
+      else return (bs, sz)
+  myGen = do
+    (bs, sz@ChunkSize{numRegularBlocks = numSlotsPerChunk}) <- genWithSpace
+    let maxSlotRaw = numSlotsPerChunk * unChunkNo (getMinChunk sz bs) - 1
+    slot <- SlotNo <$> choose (0, maxSlotRaw)
     hash <- arbitrary
     valid <- arbitrary
     return (bs, sz, unsafeTestBlock slot hash valid)
@@ -490,6 +602,9 @@ genBlocksAndChunkSize = do
 genUniqueHashes :: Int -> Gen [TestHash]
 genUniqueHashes n = map (\h -> testHashFromList [fromIntegral h]) <$> shuffle [1 .. n]
 
+getMinChunk :: ChunkSize -> [TestBlock] -> ChunkNo
+getMinChunk chunkSize = ChunkLayout.chunkIndexOfSlot (UniformChunkSize chunkSize) . minimum . map blockSlot
+
 incrementSlot :: TestBlock -> TestBlock
 incrementSlot b = unsafeTestBlock (SlotNo $ 1 + unSlotNo (blockSlot b)) (blockHash b) (tbValid b)
 
@@ -572,6 +687,12 @@ tests =
         "onDemandIteratorFrom errors when starting from after the last block but within the same chunk"
         prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk
     , testProperty
-        "onDemandIteratorFrom errors when starting from after the last block and in another chunk"
+        "onDemandIteratorFrom errors when starting from after the last block and in a greater chunk"
         prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk
+    , testProperty
+        "onDemandIteratorFrom errors when starting from before the first block but within the same chunk"
+        prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockButWithinSameChunk
+    , testProperty
+        "onDemandIteratorFrom errors when starting from before the first block and in a lesser chunk"
+        prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk
     ]
