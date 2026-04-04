@@ -370,7 +370,7 @@ prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHa
  where
   myGen = do
     (bs, sz) <- genBlocksAndChunkSize
-    b <- (bs !!) <$> chooseInt (0, length bs - 1)
+    b <- elements bs
     newHash <- arbitrary `suchThat` (/= blockHash b)
     let newBlock = unsafeTestBlock newHash (blockSlot b) (tbValid b)
     return (bs, sz, newBlock)
