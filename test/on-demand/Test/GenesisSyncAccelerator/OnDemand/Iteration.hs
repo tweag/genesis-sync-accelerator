@@ -207,9 +207,9 @@ prop_onDemandIteratorFromIsCorrectForStreamFromExclusive =
             (StreamFromExclusive startPoint)
         (\hs -> hs === map blockHash (drop (startIndex + 1) blocks)) <$> iteratorToList iter
 
-prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock :: Property
-prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock =
-  forAll genBlocksAndChunkSize $ \(blocks, chunkSize@ChunkSize{..}) ->
+prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk :: Property
+prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk =
+  forAll (genBlocksAndChunkSize `suchThat` uncurry thereIsRoomForOneMoreSlotInFinalChunk) $ \(blocks, chunkSize@ChunkSize{..}) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
@@ -249,6 +249,10 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock =
                 then OnDemand.FirstChunkNotAvailable streamBound (ChunkNo afterLastBlockRawChunk)
                 else OnDemand.StreamBoundNotFound (blockSlot afterLastBlock, blockHash afterLastBlock) Nothing
         checkIterWithStreamFromFails runtime (=== expErr) streamBound
+ where
+  thereIsRoomForOneMoreSlotInFinalChunk :: [TestBlock] -> ChunkSize -> Bool
+  thereIsRoomForOneMoreSlotInFinalChunk blocks ChunkSize{numRegularBlocks = slotsPerChunk} =
+    maximum (map (unSlotNo . blockSlot) blocks) `mod` slotsPerChunk < (slotsPerChunk - 1)
 
 prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain :: Property
 prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
@@ -516,6 +520,6 @@ tests =
         "onDemandIteratorFrom errors when starting from a point with a slot number on chain but wrong header hash"
         prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHash
     , testProperty
-        "onDemandIteratorFrom errors when starting from after the last block"
-        prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlock
+        "onDemandIteratorFrom errors when starting from after the last block but within the same chunk"
+        prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk
     ]
