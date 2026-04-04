@@ -301,7 +301,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
       SlotNo <$> choose (firstSlotBeyondLastChunk, firstSlotBeyondLastChunk + 3 * numSlotsPerChunk)
     hash <- arbitrary
     valid <- arbitrary
-    return (bs, sz, unsafeTestBlock hash slot valid)
+    return (bs, sz, unsafeTestBlock slot hash valid)
 
 prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain :: Property
 prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
@@ -365,7 +365,7 @@ prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
         extraSlot <- elements slotOptions
         extraHash <- arbitrary
         extraValid <- arbitrary
-        return (bs, sz, unsafeTestBlock extraHash extraSlot extraValid)
+        return (bs, sz, unsafeTestBlock extraSlot extraHash extraValid)
 
 prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHash :: Property
 prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHash =
@@ -425,7 +425,7 @@ prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHa
     (bs, sz) <- genBlocksAndChunkSize
     b <- elements bs
     newHash <- arbitrary `suchThat` (/= blockHash b)
-    let newBlock = unsafeTestBlock newHash (blockSlot b) (tbValid b)
+    let newBlock = unsafeTestBlock (blockSlot b) newHash (tbValid b)
     return (bs, sz, newBlock)
 
 instance Arbitrary SlotNo where
@@ -475,8 +475,8 @@ genBlocks n = do
   return $
     zipWith3
       unsafeTestBlock
-      hashes
       slots
+      hashes
       valids
 
 genBlocksAndChunkSize :: Gen ([TestBlock], ChunkSize)
@@ -491,13 +491,13 @@ genUniqueHashes :: Int -> Gen [TestHash]
 genUniqueHashes n = map (\h -> testHashFromList [fromIntegral h]) <$> shuffle [1 .. n]
 
 incrementSlot :: TestBlock -> TestBlock
-incrementSlot b = unsafeTestBlock (blockHash b) (SlotNo $ 1 + unSlotNo (blockSlot b)) (tbValid b)
+incrementSlot b = unsafeTestBlock (SlotNo $ 1 + unSlotNo (blockSlot b)) (blockHash b) (tbValid b)
 
 iteratorToList :: Monad m => Iterator m blk b -> m [b]
 iteratorToList = fmap reverse . useIterator (:) []
 
-unsafeTestBlock :: TestHash -> SlotNo -> Validity -> TestBlock
-unsafeTestBlock hash slot valid = unsafeTestBlockWithPayload hash slot valid ()
+unsafeTestBlock :: SlotNo -> TestHash -> Validity -> TestBlock
+unsafeTestBlock slot hash valid = unsafeTestBlockWithPayload hash slot valid ()
 
 useIterator :: Monad m => (b -> a -> a) -> a -> Iterator m blk b -> m a
 useIterator combine acc0 iter = go iter $ pure acc0
