@@ -12,7 +12,7 @@ import Cardano.Slotting.Slot (SlotNo (..))
 import qualified Codec.CBOR.Write as CBOR
 import Codec.Serialise (Serialise (encode))
 import Control.Exception (try)
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
 import qualified Data.List as List
@@ -43,6 +43,7 @@ import Ouroboros.Consensus.Storage.Common
   ( BinaryBlockInfo (..)
   , BlockComponent (..)
   , StreamFrom (..)
+  , StreamTo (..)
   )
 import Ouroboros.Consensus.Storage.ImmutableDB.API
   ( Iterator (..)
@@ -350,29 +351,28 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk =
           writeTVar
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
-        let badBlockChunk = ChunkLayout.chunkIndexOfSlot chunkInfo $ blockSlot badBlock
-            getExpErr bound = OnDemand.FirstChunkNotAvailable bound badBlockChunk
+        let getExpErr bound = OnDemand.FirstChunkNotAvailable bound (getBlockChunk chunkInfo badBlock)
         conjoin
           <$> traverse
             ( \buildBound -> let b = buildBound badBlock in checkIterWithStreamFromFails runtime (=== getExpErr b) b
             )
             [StreamFromExclusive . blockPoint, StreamFromInclusive . blockRealPoint]
  where
-  genWithSpace = do
-    (bs, sz) <- genBlocksAndChunkSize
-    if null $
-      dropWhile
-        (\b -> unChunkNo (ChunkLayout.chunkIndexOfSlot (UniformChunkSize sz) (blockSlot b)) < 1)
-        bs
-      then genWithSpace
-      else return (bs, sz)
   myGen = do
-    (bs, sz@ChunkSize{numRegularBlocks = numSlotsPerChunk}) <- genWithSpace
+    (bs, sz@ChunkSize{numRegularBlocks = numSlotsPerChunk}) <- genBlocksAndChunkSizeWithRoomForLowChunk
     let maxSlotRaw = numSlotsPerChunk * unChunkNo (getMinChunk sz bs) - 1
     slot <- SlotNo <$> choose (0, maxSlotRaw)
     hash <- arbitrary
     valid <- arbitrary
     return (bs, sz, unsafeTestBlock slot hash valid)
+
+genBlocksAndChunkSizeWithRoomForLowChunk :: Gen ([TestBlock], ChunkSize)
+genBlocksAndChunkSizeWithRoomForLowChunk = do
+  (bs, sz) <- genBlocksAndChunkSize
+  let bs' = dropWhile (\b -> unChunkNo (getBlockChunk (UniformChunkSize sz) b) < 1) bs
+  if null bs'
+    then genBlocksAndChunkSizeWithRoomForLowChunk
+    else return (bs', sz)
 
 prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain :: Property
 prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
@@ -486,6 +486,68 @@ prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHa
     newHash <- arbitrary `suchThat` (/= blockHash b)
     let newBlock = unsafeTestBlock (blockSlot b) newHash (tbValid b)
     return (bs, sz, newBlock)
+
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenBothBoundsAreBelowFirstChunk :: Property
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenBothBoundsAreBelowFirstChunk =
+  forAll myGen $ \(blocks, chunkSize, (blockFrom, blockTo)) ->
+    ioProperty $
+      withTemp $ \tmp -> do
+        let firstSlot = minimum $ map blockSlot blocks
+        unless (blockSlot blockFrom < firstSlot && blockSlot blockTo < firstSlot) $
+          error "Precondition violation: stream bound slots aren't both below first block slot"
+        let chunkInfo = UniformChunkSize chunkSize
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
+        forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
+        runtime <-
+          let cfg =
+                OnDemandConfig
+                  { odcRemote =
+                      RemoteStorageConfig{rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int)), rscDstDir = tmp}
+                  , odcTracer = nullTracer
+                  , odcChunkInfo = chunkInfo
+                  , odcHasFS = fpToHasFS tmp
+                  , odcCodecConfig = TB.TestBlockCodecConfig
+                  , odcCheckIntegrity = const True
+                  , odcMaxCachedChunks = MaxCachedChunksCount . fromIntegral $ Map.size chunkedBlocks
+                  , odcPrefetchAhead = PrefetchChunksCount 0
+                  }
+           in OnDemand.newOnDemandRuntime cfg
+        state <- readTVarIO $ odrState runtime
+        atomically $
+          writeTVar
+            (odrState runtime)
+            state{odsCachedChunks = Map.keysSet chunkedBlocks}
+        let upperBound = StreamToInclusive (blockRealPoint blockTo)
+            checkError expBound (OnDemand.FirstChunkNotAvailable obsBound chunk) =
+              conjoin
+                [ obsBound === expBound
+                , chunk === ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot blockFrom)
+                ]
+            checkError _ e = counterexample ("Expected StreamBoundNotFound error but got different error: " ++ show e) False
+            checkResult lowerBound =
+              either
+                (checkError lowerBound)
+                (const $ counterexample "Expected error but got successful result" False)
+        conjoin
+          <$> traverse
+            ( \buildLowerBound ->
+                let lowerBound = buildLowerBound blockFrom
+                 in checkResult lowerBound
+                      <$> try
+                        (OnDemand.onDemandIteratorForRange runtime (GetPure ()) lowerBound upperBound >>= iteratorToList)
+            )
+            [ StreamFromExclusive . blockPoint
+            , StreamFromInclusive . blockRealPoint
+            ]
+ where
+  myGen = do
+    (bs, sz@ChunkSize{numRegularBlocks = numSlotsPerChunk}) <-
+      genBlocksAndChunkSizeWithRoomForLowChunk `suchThat` (\(_, ChunkSize _ n) -> n > 1)
+    let maxSlotRaw = numSlotsPerChunk * unChunkNo (getMinChunk sz bs) - 1
+        genBlock =
+          choose (0, maxSlotRaw) >>= \s -> uncurry (unsafeTestBlock (SlotNo s)) <$> (arbitrary :: Gen (TestHash, Validity))
+    (b1, b2) <- ((,) <$> genBlock <*> genBlock) `suchThat` (\(b, b') -> blockSlot b /= blockSlot b')
+    return (bs, sz, if blockSlot b1 > blockSlot b2 then (b2, b1) else (b1, b2))
 
 instance Arbitrary SlotNo where
   arbitrary = SlotNo <$> arbitrary
@@ -642,4 +704,7 @@ tests =
     , testProperty
         "onDemandIteratorFrom errors when starting from before the first block and in a lesser chunk"
         prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk
+    , testProperty
+        "onDemandIteratorForRange errors correctly when both bounds are below first chunk"
+        prop_onDemandIteratorForRangeErrorsCorrectlyWhenBothBoundsAreBelowFirstChunk
     ]
