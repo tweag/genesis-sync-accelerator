@@ -8,7 +8,7 @@ module Test.GenesisSyncAccelerator.Utilities
   , currentFileTypes
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
-  , getBlockChunk
+  , blockChunk
   , getCurrentFilenamesForChunk
   , getLocalUrl
   , getTopLevelConfigFilePath
@@ -65,8 +65,8 @@ getAllFilenamesForChunk :: ChunkNo -> [String]
 getAllFilenamesForChunk cn = getFilenamesForChunk cn allFileTypes
 
 -- | Get the chunk number for the given block
-getBlockChunk :: HasHeader blk => ChunkInfo -> blk -> ChunkNo
-getBlockChunk ci = ChunkLayout.chunkIndexOfSlot ci . blockSlot
+blockChunk :: HasHeader blk => ChunkInfo -> blk -> ChunkNo
+blockChunk ci = ChunkLayout.chunkIndexOfSlot ci . blockSlot
 
 -- | List the name of each file currently expected to be associated with a chunk.
 getCurrentFilenamesForChunk :: ChunkNo -> [String]
@@ -83,7 +83,7 @@ getTopLevelConfigFilePath :: IO FilePath
 getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
 
 groupBlocksByChunk :: HasHeader blk => ChunkInfo -> [blk] -> Map.Map ChunkNo [blk]
-groupBlocksByChunk ci = foldr (\b acc -> Map.insertWith (\_ old -> b : old) (getBlockChunk ci b) [b] acc) Map.empty
+groupBlocksByChunk ci = foldr (\b acc -> Map.insertWith (\_ old -> b : old) (blockChunk ci b) [b] acc) Map.empty
 
 ioQuickN :: forall prop. Testable prop => Int -> IO prop -> Property
 ioQuickN n = withMaxSuccess n . ioProperty

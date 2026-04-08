@@ -49,7 +49,7 @@ import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
-import GenesisSyncAccelerator.Util (getEntrySlot)
+import GenesisSyncAccelerator.Util (getEntrySlot, slotForStreamFrom)
 import qualified Network.HTTP.Client as HTTP
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
@@ -64,8 +64,6 @@ import Ouroboros.Consensus.Block
   , RealPoint (..)
   , SlotNo (..)
   , StandardHash
-  , WithOrigin (..)
-  , pointSlot
   , realPointSlot
   )
 import Ouroboros.Consensus.Storage.Common
@@ -281,14 +279,14 @@ mkOnDemandIterator
   from
   mbTo = do
     let applyTo :: ChunkNo -> [SizedEntry blk] -> Either (IllegalStreamResult blk) [SizedEntry blk]
-        (chunks, applyTo) = case mbTo of
-          Nothing -> (chunksFrom odcChunkInfo from, \_ es -> Right es)
+        (chunks, applyTo, isLastChunk) = case mbTo of
+          Nothing -> (chunksFrom odcChunkInfo from, \_ es -> Right es, const False)
           Just to@(StreamToInclusive (RealPoint toSlot toHash)) ->
             let cs = getChunksInRange odcChunkInfo from to
-                c' = NEL.last cs
+                isLast = (== NEL.last cs)
              in ( cs
                 , \c es ->
-                    if c == c'
+                    if isLast c
                       then
                         checkEntryMatch
                           odcChunkInfo
@@ -297,6 +295,7 @@ mkOnDemandIterator
                           (\entries -> if null entries then Nothing else Just (last entries))
                           (takeWhile (\(WithBlockSize _ e) -> getEntrySlot odcChunkInfo e <= toSlot) es)
                       else Right es
+                , isLast
                 )
         applyFrom :: ChunkNo -> [SizedEntry blk] -> Either (IllegalStreamResult blk) [SizedEntry blk]
         applyFrom c es = if c == NEL.head chunks then finalizeFrom <$> validateFrom (getFrom es) else Right es
@@ -397,8 +396,10 @@ mkOnDemandIterator
                   ok <- ensureChunkAvailable c
                   if not ok
                     then do
+                      -- TODO: need to handle cases where an interior chunk in the iteration is problematic
                       cleanupOnError
                       when (c == NEL.head chunks) $ throw (FirstChunkNotAvailable from c)
+                      maybe (pure ()) (\to -> when (isLastChunk c) $ throw (LastChunkNotAvailable to c)) mbTo
                       return IteratorExhausted
                     else do
                       it <-
@@ -518,20 +519,15 @@ deleteChunkFiles hasFS chunk = do
 -- | Identifies the set of chunks covering a given streaming range.
 getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> NEL.NonEmpty ChunkNo
 getChunksInRange chunkInfo from to =
-  let startChunk = chunkForFrom chunkInfo from
-      endChunk = chunkForTo chunkInfo to
-   in chunksBetween startChunk endChunk
- where
-  chunksBetween (ChunkNo a) (ChunkNo b) =
-    let (lo, hi) = if b < a then (b, a) else (a, b)
-     in fmap ChunkNo $ lo NEL.:| [lo + 1 .. hi]
+  let (ChunkNo lo) = chunkForFrom chunkInfo from
+      (ChunkNo hi) = chunkForTo chunkInfo to
+   in if hi < lo
+        then error ("Illegal chunk range bounds: " ++ show (lo, hi))
+        else NEL.fromList $ map ChunkNo [lo .. hi]
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo
-chunkForFrom ci (StreamFromInclusive pt) = ChunkLayout.chunkIndexOfSlot ci (realPointSlot pt)
-chunkForFrom ci (StreamFromExclusive pt) = case pointSlot pt of
-  Origin -> ChunkNo 0
-  NotOrigin slot -> ChunkLayout.chunkIndexOfSlot ci slot
+chunkForFrom ci from = maybe (ChunkNo 0) (ChunkLayout.chunkIndexOfSlot ci) $ slotForStreamFrom from
 
 -- | Translates a 'StreamTo' bound to its ending 'ChunkNo'.
 chunkForTo :: ChunkInfo -> StreamTo blk -> ChunkNo
@@ -653,6 +649,7 @@ chunksFrom ci from = NEL.iterate nextChunk (chunkForFrom ci from)
 data IllegalStreamResult blk
   = StreamBoundNotFound (SlotNo, HeaderHash blk) (Maybe (Entry blk))
   | FirstChunkNotAvailable (StreamFrom blk) ChunkNo
+  | LastChunkNotAvailable (StreamTo blk) ChunkNo
   deriving (Eq, Show)
 
 deriving instance (StandardHash blk, Typeable blk) => Exception (IllegalStreamResult blk)
