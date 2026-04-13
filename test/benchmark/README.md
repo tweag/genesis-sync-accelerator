@@ -1,62 +1,93 @@
-# GSA Mainnet Sync Benchmark
+# GSA Sync Benchmark
 
 Measures real sync times: **baseline** (normal Cardano P2P network) vs. **GSA-accelerated** (serving from S3).
+
+Works on both **mainnet** (full benchmark, 24–72h) and **preprod** (smoke test, 1–4h).
 
 ## Overview
 
 | Phase | What runs | What it measures |
 |-------|-----------|------------------|
-| **Phase 1** | cardano-node (mainnet) + chunk-uploader → S3 | Baseline sync time; validates chunk-uploader in a real scenario |
+| **Phase 1** | cardano-node + chunk-uploader → S3 | Baseline sync time; validates chunk-uploader in a real scenario |
 | **Phase 2** | GSA (reading from S3) + fresh cardano-node | GSA-accelerated sync time |
 
 ## AWS Infrastructure
 
-| Resource | Spec | Notes |
-|----------|------|-------|
-| EC2 | `r6i.2xlarge` (8 vCPU, 64 GB RAM) | Good single-thread perf + enough RAM for ledger state |
-| EBS (data) | 500 GB gp3, 6000 IOPS, 400 MB/s | Persistent across reboots |
-| S3 | Same-region bucket | 30-day auto-expiry |
+Provisioned via Terraform (`terraform/` directory).
 
-Estimated cost: **~$25–$50** for a full run (both phases).
+| Resource | Mainnet | Preprod |
+|----------|---------|---------|
+| EC2 | `r6i.2xlarge` (64 GB RAM) | `r6i.large` (16 GB RAM) |
+| EBS (data) | 500 GB gp3 | 50 GB gp3 |
+| S3 | Same-region bucket, 30-day expiry | Same |
+| **Cost** | **~$25–$50** | **~$1–$3** |
 
-## Quick Start
+## Quick Start (Terraform)
 
-### 1. Provision AWS resources (from your machine)
+### Prerequisites
+
+- Terraform >= 1.5
+- AWS credentials configured (`aws configure` or env vars)
+- An existing EC2 key pair in the target region
+
+### 1. Provision everything
 
 ```bash
-# Requires: AWS CLI with IAM/S3 permissions
-bash test/benchmark/provision.sh gsa-benchmark-mainnet-20260413
+cd test/benchmark/terraform
+
+terraform init
+
+# Mainnet (full benchmark):
+terraform apply \
+  -var ssh_key_name=my-key \
+  -var ssh_cidr="$(curl -s ifconfig.me)/32"
+
+# Or preprod (quick smoke test):
+terraform apply \
+  -var ssh_key_name=my-key \
+  -var ssh_cidr="$(curl -s ifconfig.me)/32" \
+  -var network=preprod \
+  -var instance_type=r6i.large \
+  -var volume_size_gb=50
 ```
 
-### 2. Launch EC2 instance
+This creates the S3 bucket, IAM role, security group, EC2 instance, and
+EBS volume. Cloud-init automatically sets up the instance (Nix, repo
+clone, Cardano config download, directory structure).
 
-Launch an `r6i.2xlarge` in the same region with:
-- Instance profile: `gsa-benchmark-profile`
-- 500 GB gp3 EBS attached as secondary volume
-- Security group: outbound all, inbound SSH only
-
-### 3. Setup the instance (via SSH)
+### 2. SSH in and wait for cloud-init
 
 ```bash
-git clone <repo-url> gsa && cd gsa
-BUCKET=gsa-benchmark-mainnet-20260413 bash test/benchmark/setup-instance.sh
+# Terraform prints the SSH command in its output.
+ssh -i my-key.pem ec2-user@<public-ip>
+
+# Wait for setup to finish:
+while [ ! -f /data/.cloud-init-done ]; do sleep 5; echo "waiting..."; done
+```
+
+### 3. Build (first time only)
+
+```bash
+cd gsa && nix develop .#integration-test
+# This enters a shell with cardano-node, chunk-uploader, GSA, etc.
 ```
 
 ### 4. Run Phase 1: Baseline sync + chunk upload
 
 ```bash
-cd gsa && nix develop .#integration-test
-BUCKET=gsa-benchmark-mainnet-20260413 bash test/benchmark/run-phase1.sh
+# BUCKET is in /data/benchmark.env, written by cloud-init.
+source /data/benchmark.env
+BUCKET=$BUCKET bash test/benchmark/run-phase1.sh
 ```
 
-This will take **24–72 hours**. The script is idempotent — you can safely re-run it after interruption and it will resume monitoring.
+Mainnet: **24–72 hours**. Preprod: **1–4 hours**. The script is idempotent — safe to re-run after interruption.
 
 Progress is logged to `/data/phase1/progress.csv` (one row per minute).
 
 ### 5. Validate chunk-uploader
 
 ```bash
-BUCKET=gsa-benchmark-mainnet-20260413 bash test/benchmark/validate.sh
+BUCKET=$BUCKET bash test/benchmark/validate.sh
 ```
 
 Checks: count, integrity (SHA-256 sample), tip exclusion, state file, tip.json, contiguity.
@@ -64,21 +95,24 @@ Checks: count, integrity (SHA-256 sample), tip exclusion, state file, tip.json, 
 ### 6. Run Phase 2: GSA-accelerated sync
 
 ```bash
-BUCKET=gsa-benchmark-mainnet-20260413 bash test/benchmark/run-phase2.sh
+BUCKET=$BUCKET bash test/benchmark/run-phase2.sh
 ```
 
 ### 7. Collect results
 
 ```bash
-BUCKET=gsa-benchmark-mainnet-20260413 bash test/benchmark/report.sh
+BUCKET=$BUCKET bash test/benchmark/report.sh
 ```
 
 ### 8. Teardown
 
 ```bash
-bash test/benchmark/teardown.sh gsa-benchmark-mainnet-20260413
-# Also: terminate the EC2 instance and delete EBS volumes via the console.
+# From your local machine:
+cd test/benchmark/terraform
+terraform destroy
 ```
+
+This removes everything: instance, EBS volume, S3 bucket (including contents), IAM role.
 
 ## Crash Recovery
 
@@ -126,17 +160,26 @@ All scripts accept configuration via environment variables:
 test/benchmark/
 ├── README.md              ← you are here
 ├── lib.sh                 # Shared helpers
-├── provision.sh           # Create S3 + IAM (run locally)
-├── setup-instance.sh      # On-instance: Nix, build, config, EBS
+├── provision.sh           # Create S3 + IAM (legacy, use terraform instead)
+├── setup-instance.sh      # On-instance setup (cloud-init runs this automatically)
 ├── run-phase1.sh          # Baseline sync + chunk-uploader
 ├── run-phase2.sh          # GSA-accelerated sync
 ├── validate.sh            # Chunk-uploader correctness checks
 ├── report.sh              # Collect timing results
-├── teardown.sh            # AWS resource cleanup
-└── systemd/
-    ├── cardano-node@.service
-    ├── chunk-uploader.service
-    └── gsa.service
+├── teardown.sh            # AWS cleanup (legacy, use terraform destroy instead)
+├── systemd/
+│   ├── cardano-node@.service
+│   ├── chunk-uploader.service
+│   └── gsa.service
+└── terraform/
+    ├── main.tf            # Provider, AMI lookup, locals
+    ├── variables.tf       # All inputs (instance type, network, SSH key, etc.)
+    ├── s3.tf              # Bucket + lifecycle + public access block
+    ├── iam.tf             # Role, policy, instance profile
+    ├── network.tf         # Security group (default VPC)
+    ├── ec2.tf             # Instance + EBS volume + cloud-init
+    ├── cloud-init.yaml    # Instance bootstrap template
+    └── outputs.tf         # IP, bucket name, SSH command, next steps
 ```
 
 Data on the instance:

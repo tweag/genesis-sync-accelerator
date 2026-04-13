@@ -1,0 +1,96 @@
+#cloud-config
+
+package_update: true
+packages:
+  - git
+  - jq
+  - curl
+  - unzip
+
+# Format and mount the data EBS volume.
+disk_setup:
+  /dev/nvme1n1:
+    table_type: gpt
+    layout: true
+
+fs_setup:
+  - device: /dev/nvme1n1
+    filesystem: ext4
+    label: gsa-data
+
+mounts:
+  - [/dev/nvme1n1, /data, ext4, "defaults,nofail", "0", "2"]
+
+runcmd:
+  # Own the data dir.
+  - chown ec2-user:ec2-user /data
+
+  # Create directory structure.
+  - mkdir -p /data/config /data/phase1/node-db /data/phase1/state /data/phase2/node-db /data/phase2/gsa-cache
+  - chown -R ec2-user:ec2-user /data
+
+  # Install AWS CLI v2 (Amazon Linux 2023 may already have it, but ensure).
+  - |
+    if ! command -v aws &>/dev/null; then
+      curl -sSfL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+      unzip -q /tmp/awscliv2.zip -d /tmp
+      /tmp/aws/install
+      rm -rf /tmp/aws /tmp/awscliv2.zip
+    fi
+
+  # Download Cardano network config files.
+  - |
+    NETWORK="${network}"
+    CONFIG_URL="https://book.play.dev.cardano.org/environments/$NETWORK"
+    for f in config.json topology.json byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
+      curl -sSfL "$CONFIG_URL/$f" -o "/data/config/$f"
+    done
+    # peer-snapshot may not exist for all networks; ignore failure.
+    curl -sSfL "$CONFIG_URL/peer-snapshot.json" -o "/data/config/peer-snapshot.json" || true
+    chown -R ec2-user:ec2-user /data/config
+
+  # Patch config.json for GenesisMode + useful trace flags.
+  - |
+    CONFIG=/data/config/config.json
+    # Set GenesisMode if a ConsensusMode key exists.
+    if grep -q '"ConsensusMode"' "$CONFIG"; then
+      sed -i 's/"ConsensusMode":[^,]*/"ConsensusMode": "GenesisMode"/' "$CONFIG"
+    fi
+    # Enable P2P.
+    sed -i 's/"EnableP2P":\s*false/"EnableP2P": true/' "$CONFIG"
+    # Enable useful trace flags.
+    for flag in TraceChainDb TraceBlockFetchClient TraceConnectionManager TracePeerSelection; do
+      sed -i "s/\"$flag\":\s*false/\"$flag\": true/" "$CONFIG"
+    done
+
+  # Clone the GSA repo.
+  - su - ec2-user -c 'git clone --branch "${repo_branch}" "${repo_url}" /home/ec2-user/gsa'
+
+  # Write benchmark environment file.
+  - |
+    cat > /data/benchmark.env <<'ENVEOF'
+    BUCKET=${bucket_name}
+    AWS_REGION=${region}
+    DATA_DIR=/data
+    CONFIG_DIR=/data/config
+    REPO_ROOT=/home/ec2-user/gsa
+    NETWORK=${network}
+    INSTANCE_TYPE=${instance_type}
+    ENVEOF
+    # Strip leading whitespace from heredoc.
+    sed -i 's/^[[:space:]]*//' /data/benchmark.env
+    chown ec2-user:ec2-user /data/benchmark.env
+
+  # Install Nix (single-user, as ec2-user).
+  - su - ec2-user -c 'curl -L https://nixos.org/nix/install | sh -s -- --no-daemon'
+
+  # Copy systemd unit files (if repo cloned successfully).
+  - |
+    if [ -d /home/ec2-user/gsa/test/benchmark/systemd ]; then
+      cp /home/ec2-user/gsa/test/benchmark/systemd/*.service /etc/systemd/system/
+      systemctl daemon-reload
+    fi
+
+  # Signal cloud-init completion.
+  - touch /data/.cloud-init-done
+  - echo "GSA benchmark cloud-init complete" >> /var/log/cloud-init-output.log
