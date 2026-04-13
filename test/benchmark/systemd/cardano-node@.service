@@ -1,0 +1,31 @@
+[Unit]
+Description=Cardano Node (GSA Benchmark %i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/data/benchmark.env
+ExecStart=/bin/bash -lc '\
+  cd ${REPO_ROOT} && \
+  nix develop .#integration-test --command \
+    cardano-node run \
+      --config ${CONFIG_DIR}/config.json \
+      --database-path /data/%i/node-db \
+      --topology /data/%i/topology.json \
+      --port %i \
+      --socket-path /data/%i/node.sock \
+  '
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+StandardOutput=append:/data/%i/node.log
+StandardError=append:/data/%i/node.log
+
+# Give the node time to flush on stop.
+TimeoutStopSec=60
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

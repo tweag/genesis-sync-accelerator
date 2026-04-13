@@ -1,0 +1,30 @@
+[Unit]
+Description=Genesis Sync Accelerator (GSA Benchmark)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/data/benchmark.env
+ExecStart=/bin/bash -lc '\
+  cd ${REPO_ROOT} && \
+  nix develop .#integration-test --command \
+    genesis-sync-accelerator \
+      --config ${CONFIG_DIR}/config.json \
+      --rs-src-url https://${BUCKET}.s3.${AWS_REGION}.amazonaws.com/immutable \
+      --cache-dir /data/phase2/gsa-cache \
+      --max-cached-chunks 20 \
+      --prefetch-ahead 10 \
+      --port 3001 \
+      --addr 127.0.0.1 \
+      --tip-refresh-interval 600 \
+  '
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+StandardOutput=append:/data/phase2/gsa.log
+StandardError=append:/data/phase2/gsa.log
+
+[Install]
+WantedBy=multi-user.target

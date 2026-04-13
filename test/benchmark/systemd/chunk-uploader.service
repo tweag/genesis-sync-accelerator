@@ -1,0 +1,27 @@
+[Unit]
+Description=Chunk Uploader (GSA Benchmark)
+After=cardano-node@phase1.service
+
+[Service]
+Type=simple
+EnvironmentFile=/data/benchmark.env
+ExecStart=/bin/bash -lc '\
+  cd ${REPO_ROOT} && \
+  nix develop .#integration-test --command \
+    chunk-uploader \
+      --immutable-dir /data/phase1/node-db/immutable \
+      --s3-bucket ${BUCKET} \
+      --s3-prefix immutable/ \
+      --s3-region ${AWS_REGION} \
+      --poll-interval 30 \
+      --state-file /data/phase1/state/uploader-state \
+      --config ${CONFIG_DIR}/config.json \
+  '
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=append:/data/phase1/uploader.log
+StandardError=append:/data/phase1/uploader.log
+
+[Install]
+WantedBy=multi-user.target
