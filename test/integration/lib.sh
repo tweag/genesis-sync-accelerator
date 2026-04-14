@@ -13,15 +13,17 @@ start_cdn() {
   echo $!
 }
 
-# start_accelerator <cache_dir> <config> <cdn_url> <port> <max_chunks> <log_file>
+# start_accelerator <gsa_config> <node_config> <cdn_url> <port> <cache_dir> <log_file> [extra_flags...]
 start_accelerator() {
-  local cache_dir="$1" config="$2" cdn_url="$3" port="$4" max_chunks="$5" log_file="$6"
+  local gsa_config="$1" node_config="$2" cdn_url="$3" port="$4" cache_dir="$5" log_file="$6"
+  shift 6
   stdbuf -oL ${GSA:-genesis-sync-accelerator} \
-    --config "$config" \
+    --gsa-config "$gsa_config" \
+    --node-config "$node_config" \
     --rs-src-url "$cdn_url" \
-    --cache-dir "$cache_dir" \
     --port "$port" \
-    --max-cached-chunks "$max_chunks" \
+    --cache-dir "$cache_dir" \
+    "$@" \
     +RTS -T -RTS \
     >"$log_file" 2>&1 &
   echo $!

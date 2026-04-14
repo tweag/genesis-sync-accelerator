@@ -42,6 +42,7 @@ executable genesis-sync-accelerator
     "-with-rtsopts=-N -I0 -A16m"
 
   other-modules:
+    GenesisSyncAccelerator.Config
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
     GenesisSyncAccelerator.OnDemand
@@ -85,6 +86,7 @@ executable genesis-sync-accelerator
     trace-dispatcher,
     trace-resources,
     with-utf8,
+    yaml,
 
 executable immdb-get-tip
   import: common-all
@@ -106,6 +108,7 @@ library
   import: common-all
   hs-source-dirs: src
   exposed-modules:
+    GenesisSyncAccelerator.Config
     GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.RemoteStorage
     GenesisSyncAccelerator.Tracing
@@ -253,3 +256,21 @@ test-suite on-demand-tests
 
   other-modules:
     Test.GenesisSyncAccelerator.OnDemand.Runtime
+
+test-suite config-tests
+  import: common-all
+  main-is: Main.hs
+  hs-source-dirs: test/config
+  type: exitcode-stdio-1.0
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    genesis-sync-accelerator,
+    tasty,
+    tasty-hunit,
+    yaml,
+
+  other-modules:
+    Test.GenesisSyncAccelerator.Config

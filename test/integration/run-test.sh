@@ -36,8 +36,7 @@ CDN_PORT="${CDN_PORT:-8780}"
 ACCEL_PORT="${ACCEL_PORT:-8781}"
 CONSUMER_PORT="${CONSUMER_PORT:-8782}"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
-MAX_CACHED_CHUNKS=25
-RTS_FREQUENCY="${RTS_FREQUENCY:-2000}"  # Accelerator RTS event log frequency in ms.
+GSA_CONFIG="$SCRIPT_DIR/config.yaml"
 POLL_INTERVAL=5
 LOG_TAIL_LINES=50
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
@@ -162,7 +161,7 @@ fi
 echo ""
 echo "${BOLD}=== Starting accelerator ===${NC}"
 
-ACCEL_PID=$(start_accelerator "$ACCEL_CACHE" "$CONFIG" "http://127.0.0.1:${CDN_PORT}" "$ACCEL_PORT" "$MAX_CACHED_CHUNKS" "$TMPDIR/accelerator.log")
+ACCEL_PID=$(start_accelerator "$GSA_CONFIG" "$CONFIG" "http://127.0.0.1:${CDN_PORT}" "$ACCEL_PORT" "$ACCEL_CACHE" "$TMPDIR/accelerator.log")
 PIDS+=($ACCEL_PID)
 
 wait_for_port "$ACCEL_PORT" 15 "Accelerator"
