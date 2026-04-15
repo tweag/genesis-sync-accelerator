@@ -72,6 +72,12 @@ data TraceRemoteStorageEvent
     TraceDownloadSuccess String Word64
   | -- | Failed to download a file.
     TraceDownloadFailure TraceDownloadFailure
+  | -- | Retrying download after failure.
+    TraceDownloadRetry
+      String
+      Int
+      -- | URL, retry count, delay in microseconds
+      Int
   | -- | Starting download of tip metadata.
     TraceTipFetchStart !String
   | -- | Successfully fetched tip metadata.

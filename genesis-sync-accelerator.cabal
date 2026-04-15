@@ -229,6 +229,7 @@ test-suite download-tests
   other-modules:
     Test.GenesisSyncAccelerator.Download.Chunks
     Test.GenesisSyncAccelerator.Download.RemoteTip
+    Test.GenesisSyncAccelerator.Download.Retry
 
 test-suite on-demand-tests
   import: common-all, common-test

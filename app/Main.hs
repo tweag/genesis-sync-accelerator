@@ -59,7 +59,13 @@ main = withStdTerminalHandles $ do
   traceWith stdoutTracer $
     "Running ImmDB server at " ++ printHost (resolvedAddr opts, resolvedPort opts)
   startResourceTracer stdoutTracer (unRTSFrequency (resolvedRtsFrequency opts))
-  let remoteCfg = RemoteStorage.RemoteStorageConfig (resolvedSrcUrl opts) (resolvedCacheDir opts)
+  let remoteCfg =
+        RemoteStorage.RemoteStorageConfig
+          { RemoteStorage.rscSrcUrl = resolvedSrcUrl opts
+          , RemoteStorage.rscDstDir = resolvedCacheDir opts
+          , RemoteStorage.rscMaxRetries = resolvedMaxRetries opts
+          , RemoteStorage.rscBaseDelay = resolvedBaseDelay opts
+          }
   absurd
     <$> Diffusion.run
       remoteCfg
@@ -161,6 +167,20 @@ optsParser =
             [ long "tip-refresh-interval"
             , help "How often to re-fetch the tip from the CDN, in seconds (default: 600)"
             ]
+    pcMaxRetries <-
+      optional $
+        option auto $
+          mconcat
+            [ long "max-retries"
+            , help "Maximum number of retries for transient download failures (default: 5)"
+            ]
+    pcBaseDelay <-
+      optional $
+        option auto $
+          mconcat
+            [ long "base-delay"
+            , help "Base delay in microseconds for exponential backoff (default: 100000)"
+            ]
     pure
       ( gsaConfigPath
       , PartialConfig
@@ -173,5 +193,7 @@ optsParser =
           , pcMaxCachedChunks
           , pcPrefetchAhead
           , pcTipRefreshInterval
+          , pcMaxRetries
+          , pcBaseDelay
           }
       )
