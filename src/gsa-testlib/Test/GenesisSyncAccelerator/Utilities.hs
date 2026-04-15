@@ -101,7 +101,13 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
   codecConfig <- configCodec <$> getTopLevelConfig configFile
   return $
     OnDemandConfig
-      { odcRemote = RemoteStorageConfig{rscSrcUrl = getLocalUrl port, rscDstDir = tmpdir}
+      { odcRemote =
+          RemoteStorageConfig
+            { rscSrcUrl = getLocalUrl port
+            , rscDstDir = tmpdir
+            , rscMaxRetries = 0 -- Disable retries in tests by default
+            , rscBaseDelay = 0
+            }
       , odcTracer = nullTracer
       , odcChunkInfo = podcChunkInfo
       , odcHasFS = fpToHasFS tmpdir

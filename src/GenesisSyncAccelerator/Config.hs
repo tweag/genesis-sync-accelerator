@@ -12,7 +12,7 @@ module GenesisSyncAccelerator.Config
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), withObject, (.:?))
 import Data.Aeson.Types (Parser)
-import Data.List (intercalate, sort)
+import Data.List (dropWhileEnd, intercalate, sort)
 import Data.Maybe (fromMaybe, isNothing)
 import GenesisSyncAccelerator.Parsers (parseAddr)
 import GenesisSyncAccelerator.Types
@@ -35,6 +35,8 @@ data ResolvedOpts = ResolvedOpts
   , resolvedMaxCachedChunks :: MaxCachedChunksCount
   , resolvedPrefetchAhead :: PrefetchChunksCount
   , resolvedTipRefreshInterval :: TipRefreshInterval
+  , resolvedMaxRetries :: Int
+  , resolvedBaseDelay :: Int
   }
 
 newtype RTSFrequency = RTSFrequency {unRTSFrequency :: Int}
@@ -51,6 +53,8 @@ data PartialConfig = PartialConfig
   , pcMaxCachedChunks :: Maybe Natural
   , pcPrefetchAhead :: Maybe Natural
   , pcTipRefreshInterval :: Maybe Natural
+  , pcMaxRetries :: Maybe Int
+  , pcBaseDelay :: Maybe Int
   }
 
 -- | Left-biased merge: the first argument wins when both sides are 'Just'.
@@ -66,6 +70,8 @@ instance Semigroup PartialConfig where
       , pcMaxCachedChunks = pcMaxCachedChunks a <|> pcMaxCachedChunks b
       , pcPrefetchAhead = pcPrefetchAhead a <|> pcPrefetchAhead b
       , pcTipRefreshInterval = pcTipRefreshInterval a <|> pcTipRefreshInterval b
+      , pcMaxRetries = pcMaxRetries a <|> pcMaxRetries b
+      , pcBaseDelay = pcBaseDelay a <|> pcBaseDelay b
       }
 
 instance Monoid PartialConfig where
@@ -80,6 +86,8 @@ instance Monoid PartialConfig where
       , pcMaxCachedChunks = Nothing
       , pcPrefetchAhead = Nothing
       , pcTipRefreshInterval = Nothing
+      , pcMaxRetries = Nothing
+      , pcBaseDelay = Nothing
       }
 
 -- | Default values for all optional configuration fields.
@@ -94,6 +102,8 @@ defaultConfig =
     , pcMaxCachedChunks = Just 10
     , pcPrefetchAhead = Just 3
     , pcTipRefreshInterval = Just 600
+    , pcMaxRetries = Just 5
+    , pcBaseDelay = Just 100000
     }
 
 instance FromJSON PartialConfig where
@@ -108,6 +118,8 @@ instance FromJSON PartialConfig where
       <*> o .:? "max-cached-chunks"
       <*> o .:? "prefetch-ahead"
       <*> o .:? "tip-refresh-interval"
+      <*> o .:? "max-retries"
+      <*> o .:? "base-delay"
    where
     parseAddrJSON s = case parseAddr s of
       Right a -> pure a
@@ -127,10 +139,12 @@ resolveOpts pc =
           , resolvedNodeConfig = grab (pcNodeConfig pc)
           , resolvedRtsFrequency = RTSFrequency $ grab (pcRtsFrequency pc)
           , resolvedCacheDir = grab (pcCacheDir pc)
-          , resolvedSrcUrl = grab (pcSrcUrl pc)
+          , resolvedSrcUrl = dropWhileEnd (== '/') $ grab (pcSrcUrl pc)
           , resolvedMaxCachedChunks = MaxCachedChunksCount $ grab (pcMaxCachedChunks pc)
           , resolvedPrefetchAhead = PrefetchChunksCount $ grab (pcPrefetchAhead pc)
           , resolvedTipRefreshInterval = TipRefreshInterval $ grab (pcTipRefreshInterval pc)
+          , resolvedMaxRetries = grab (pcMaxRetries pc)
+          , resolvedBaseDelay = grab (pcBaseDelay pc)
           }
     _ ->
       Left $
@@ -151,6 +165,8 @@ resolveOpts pc =
     , ("max-cached-chunks", isNothing (pcMaxCachedChunks pc))
     , ("prefetch-ahead", isNothing (pcPrefetchAhead pc))
     , ("tip-refresh-interval", isNothing (pcTipRefreshInterval pc))
+    , ("max-retries", isNothing (pcMaxRetries pc))
+    , ("base-delay", isNothing (pcBaseDelay pc))
     ]
 
 showAddr :: HostAddr -> String
