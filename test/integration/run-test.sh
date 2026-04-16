@@ -224,7 +224,7 @@ while (( ELAPSED < CONSUMER_TIMEOUT )); do
   done
 
   # Hook C: Richer progress in demo mode
-  CACHE_COUNT=$(ls "$ACCEL_CACHE"/*.chunk 2>/dev/null | wc -l)
+  CACHE_COUNT=$(find "$ACCEL_CACHE" -maxdepth 1 -name '*.chunk' | wc -l)
   if demo_is_active; then
     echo "  ${ELAPSED}/${CONSUMER_TIMEOUT}s — ${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE_BLOCKS_COUNT} blocks | Cache: ${CACHE_COUNT} chunks"
   else
