@@ -1,0 +1,13 @@
+# GSA integration test configuration.
+# This file also serves as an example of the full config file format.
+# Only max-cached-chunks and rts-frequency are actually used from here;
+max-cached-chunks: 25
+rts-frequency: 2000
+
+# The integration test overrides node-config, rs-src-url, port, and
+# cache-dir via CLI flags, which take precedence over this file.
+node-config: config/config.json
+rs-src-url: http://127.0.0.1:8780
+addr: 127.0.0.1
+port: 8781
+cache-dir: /tmp/gsa-cache
