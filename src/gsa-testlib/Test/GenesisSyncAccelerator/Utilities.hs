@@ -8,14 +8,18 @@ module Test.GenesisSyncAccelerator.Utilities
   , currentFileTypes
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
+  , blockChunk
   , getCurrentFilenamesForChunk
+  , getLocalUrl
   , getTopLevelConfigFilePath
+  , groupBlocksByChunk
   , ioQuickly
   , mkFullConfig
   , testWithFileServer
   , tracerToFile
   ) where
 
+import qualified Data.Map as Map
 import qualified Data.Text as Text
 import GenesisSyncAccelerator.OnDemand (OnDemandConfig (..))
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
@@ -23,8 +27,12 @@ import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (Port, testWithApplication)
+import Ouroboros.Consensus.Block (HasHeader)
+import Ouroboros.Consensus.Block.Abstract (blockSlot)
 import Ouroboros.Consensus.Config (configCodec)
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
+import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
 import Paths_genesis_sync_accelerator (getDataFileName)
 import System.FS.IO (HandleIO)
 import System.FilePath ((</>))
@@ -56,6 +64,10 @@ genSeveralChunkNumbers = do
 getAllFilenamesForChunk :: ChunkNo -> [String]
 getAllFilenamesForChunk cn = getFilenamesForChunk cn allFileTypes
 
+-- | Get the chunk number for the given block
+blockChunk :: HasHeader blk => ChunkInfo -> blk -> ChunkNo
+blockChunk ci = ChunkLayout.chunkIndexOfSlot ci . blockSlot
+
 -- | List the name of each file currently expected to be associated with a chunk.
 getCurrentFilenamesForChunk :: ChunkNo -> [String]
 getCurrentFilenamesForChunk cn = getFilenamesForChunk cn currentFileTypes
@@ -64,8 +76,14 @@ getCurrentFilenamesForChunk cn = getFilenamesForChunk cn currentFileTypes
 getFilenamesForChunk :: ChunkNo -> [FileType] -> [String]
 getFilenamesForChunk cn = map (\ft -> Text.unpack $ getFileName ft cn)
 
+getLocalUrl :: Int -> String
+getLocalUrl port = "http://localhost:" ++ show port
+
 getTopLevelConfigFilePath :: IO FilePath
 getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
+
+groupBlocksByChunk :: HasHeader blk => ChunkInfo -> [blk] -> Map.Map ChunkNo [blk]
+groupBlocksByChunk ci = foldr (\b acc -> Map.insertWith (\_ old -> b : old) (blockChunk ci b) [b] acc) Map.empty
 
 ioQuickN :: forall prop. Testable prop => Int -> IO prop -> Property
 ioQuickN n = withMaxSuccess n . ioProperty
@@ -83,7 +101,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
   codecConfig <- configCodec <$> getTopLevelConfig configFile
   return $
     OnDemandConfig
-      { odcRemote = RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port, rscDstDir = tmpdir}
+      { odcRemote = RemoteStorageConfig{rscSrcUrl = getLocalUrl port, rscDstDir = tmpdir}
       , odcTracer = nullTracer
       , odcChunkInfo = podcChunkInfo
       , odcHasFS = fpToHasFS tmpdir

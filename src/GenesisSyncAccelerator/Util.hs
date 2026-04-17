@@ -1,4 +1,4 @@
-module GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig, getImmDbTip) where
+module GenesisSyncAccelerator.Util (fpToHasFS, getEntrySlot, getTopLevelConfig, getImmDbTip, slotForStreamFrom) where
 
 import qualified Cardano.Tools.DBAnalyser.Block.Cardano as Cardano
 import Cardano.Tools.DBAnalyser.HasAnalysis (mkProtocolInfo)
@@ -11,15 +11,21 @@ import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , ConvertRawHash (toRawHash)
   , SlotNo (..)
-  , WithOrigin
+  , WithOrigin (..)
+  , pointSlot
+  , realPointSlot
   )
 import Ouroboros.Consensus.Config (configCodec, configStorage)
 import Ouroboros.Consensus.Node.InitStorage
   ( NodeInitStorage (nodeCheckIntegrity, nodeImmutableDbChunkInfo)
   )
 import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
+import Ouroboros.Consensus.Storage.Common (StreamFrom (..))
 import Ouroboros.Consensus.Storage.ImmutableDB (ImmutableDbArgs (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB as ImmutableDB
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
+import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
+import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import System.FS.API (HasFS, SomeHasFS (..))
 import System.FS.API.Types (MountPoint (MountPoint))
 import System.FS.IO (HandleIO, ioHasFS)
@@ -27,6 +33,10 @@ import System.FS.IO (HandleIO, ioHasFS)
 -- | Lift a filepath to a commonly used member of 'HasFS'.
 fpToHasFS :: FilePath -> HasFS IO HandleIO
 fpToHasFS = ioHasFS . MountPoint
+
+-- | Get the given entry's slot number.
+getEntrySlot :: ChunkInfo -> Entry blk -> SlotNo
+getEntrySlot ci = ChunkLayout.slotNoOfBlockOrEBB ci . blockOrEBB
 
 -- | From the given config file, get a 'TopLevelConfig' for a standard Cardano block.
 getTopLevelConfig :: FilePath -> IO StandardTopLevelConfig
@@ -52,6 +62,12 @@ getImmDbTip cfg immDBDir = withRegistry $ \registry ->
       , immRegistry = registry
       , immHasFS = SomeHasFS hasFS
       }
+
+slotForStreamFrom :: StreamFrom blk -> Maybe SlotNo
+slotForStreamFrom (StreamFromExclusive pt) = case pointSlot pt of
+  Origin -> Nothing
+  NotOrigin slot -> Just slot
+slotForStreamFrom (StreamFromInclusive pt) = Just $ realPointSlot pt
 
 toRemoteTipInfo :: ImmutableDB.Tip StandardBlock -> RemoteTipInfo
 toRemoteTipInfo tip =

@@ -1,3 +1,4 @@
+-- | Types used across test suites
 module Test.GenesisSyncAccelerator.Types
   ( ConfigFile (..)
   , TmpDir (..)

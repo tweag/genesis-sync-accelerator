@@ -162,6 +162,7 @@ library gsa-testlib
 
   build-depends:
     QuickCheck,
+    containers,
     contra-tracer,
     filepath,
     fs-api,
@@ -241,13 +242,19 @@ test-suite on-demand-tests
   build-depends:
     aeson,
     bytestring,
+    cardano-slotting,
+    cborg,
+    containers,
+    contra-tracer,
     exceptions,
     filepath,
     fs-api,
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
+    ouroboros-consensus:unstable-consensus-testlib,
     ouroboros-consensus-cardano,
+    serialise,
     strict-checked-vars,
     tasty,
     tasty-quickcheck,
@@ -255,6 +262,7 @@ test-suite on-demand-tests
     text,
 
   other-modules:
+    Test.GenesisSyncAccelerator.OnDemand.Iteration
     Test.GenesisSyncAccelerator.OnDemand.Runtime
 
 test-suite config-tests
