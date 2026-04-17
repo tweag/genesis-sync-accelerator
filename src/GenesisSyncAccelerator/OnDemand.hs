@@ -601,7 +601,10 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component applyFro
     let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
     Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
 
-  let flatEntries = either throw id (applyFrom allEntries >>= applyTo)
+  flatEntries <-
+    case applyFrom allEntries >>= applyTo of
+      Left err -> throw err
+      Right entries -> pure entries
   varEntries <- newTVarIO flatEntries
   varHandle <- newTVarIO (Nothing :: Maybe (Handle h))
 
