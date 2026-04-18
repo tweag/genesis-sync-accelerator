@@ -170,7 +170,7 @@ newOnDemandRuntime ::
   OnDemandConfig m blk h ->
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg@OnDemandConfig{odcRemote, odcTracer} = do
-  env <- liftIO $ Remote.newRemoteStorageEnv (Remote.rscSrcUrl odcRemote) (Remote.rscDstDir odcRemote)
+  env <- liftIO $ Remote.newRemoteStorageEnvWithConfig odcRemote
   mbTip <- liftIO $ tipFromRemoteEnv odcTracer env
   stateVar <- newTVarIO (OnDemandState Set.empty [] mbTip)
   prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
