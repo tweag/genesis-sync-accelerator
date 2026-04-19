@@ -19,6 +19,7 @@ import GenesisSyncAccelerator.Types
   ( HostAddr
   , MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
+  , RetryCount (..)
   , TipRefreshInterval (..)
   )
 import qualified Network.Socket as Socket
@@ -35,7 +36,7 @@ data ResolvedOpts = ResolvedOpts
   , resolvedMaxCachedChunks :: MaxCachedChunksCount
   , resolvedPrefetchAhead :: PrefetchChunksCount
   , resolvedTipRefreshInterval :: TipRefreshInterval
-  , resolvedMaxRetries :: Int
+  , resolvedMaxRetries :: RetryCount
   , resolvedBaseDelay :: Int
   }
 
@@ -53,7 +54,7 @@ data PartialConfig = PartialConfig
   , pcMaxCachedChunks :: Maybe Natural
   , pcPrefetchAhead :: Maybe Natural
   , pcTipRefreshInterval :: Maybe Natural
-  , pcMaxRetries :: Maybe Int
+  , pcMaxRetries :: Maybe RetryCount
   , pcBaseDelay :: Maybe Int
   }
 
@@ -102,7 +103,7 @@ defaultConfig =
     , pcMaxCachedChunks = Just 10
     , pcPrefetchAhead = Just 3
     , pcTipRefreshInterval = Just 600
-    , pcMaxRetries = Just 5
+    , pcMaxRetries = Just (RetryCount 5)
     , pcBaseDelay = Just 100000
     }
 

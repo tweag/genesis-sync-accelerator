@@ -13,6 +13,7 @@ import GenesisSyncAccelerator.Config
 import GenesisSyncAccelerator.Types
   ( MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
+  , RetryCount (..)
   , TipRefreshInterval (..)
   )
 import Test.Tasty (TestTree, testGroup)
@@ -44,7 +45,7 @@ testDefaults = testCase "defaults apply when only required fields are set" $ do
       resolvedMaxCachedChunks opts @?= MaxCachedChunksCount 10
       resolvedPrefetchAhead opts @?= PrefetchChunksCount 3
       resolvedTipRefreshInterval opts @?= TipRefreshInterval 600
-      resolvedMaxRetries opts @?= 5
+      resolvedMaxRetries opts @?= RetryCount 5
       resolvedBaseDelay opts @?= 100000
       resolvedSrcUrl opts @?= "http://cdn"
 
@@ -58,7 +59,7 @@ testCliOverridesConfigFile = testCase "CLI overrides config file values" $ do
           , pcPort = Just 4000
           , pcMaxCachedChunks = Just 20
           , pcCacheDir = Just "/cli-cache"
-          , pcMaxRetries = Just 10
+          , pcMaxRetries = Just (RetryCount 10)
           , pcBaseDelay = Just 50000
           }
       cf =
@@ -68,7 +69,7 @@ testCliOverridesConfigFile = testCase "CLI overrides config file values" $ do
           , pcPort = Just 5000
           , pcMaxCachedChunks = Just 30
           , pcCacheDir = Just "/cf-cache"
-          , pcMaxRetries = Just 15
+          , pcMaxRetries = Just (RetryCount 15)
           , pcBaseDelay = Just 75000
           }
   case resolveOpts (cli <> cf <> defaultConfig) of
@@ -79,7 +80,7 @@ testCliOverridesConfigFile = testCase "CLI overrides config file values" $ do
       resolvedPort opts @?= 4000
       resolvedMaxCachedChunks opts @?= MaxCachedChunksCount 20
       resolvedCacheDir opts @?= "/cli-cache"
-      resolvedMaxRetries opts @?= 10
+      resolvedMaxRetries opts @?= RetryCount 10
       resolvedBaseDelay opts @?= 50000
 
 -- | Config file values are used when CLI omits them.
@@ -148,7 +149,7 @@ testYamlParsing = testCase "YAML parses into PartialConfig" $ do
       pcPort pc @?= Just 3002
       pcMaxCachedChunks pc @?= Just 25
       pcAddr pc @?= Just (192, 168, 1, 1)
-      pcMaxRetries pc @?= Just 7
+      pcMaxRetries pc @?= Just (RetryCount 7)
       pcBaseDelay pc @?= Just 200000
       pcRtsFrequency pc @?= Nothing
       pcCacheDir pc @?= Nothing

@@ -10,6 +10,7 @@ import GenesisSyncAccelerator.RemoteStorage
   , downloadChunk
   , newRemoteStorageEnvWithConfig
   )
+import GenesisSyncAccelerator.Types (RetryCount (..))
 import Network.HTTP.Types (status200, status503)
 import Network.Wai (Application, responseLBS)
 import Network.Wai.Handler.Warp (testWithApplication)
@@ -50,7 +51,7 @@ testRetrySuccess = Temp.withSystemTempDirectory "retry-test-success" $ \tmp -> d
           RemoteStorageConfig
             { rscSrcUrl = getLocalUrl port
             , rscDstDir = cacheDir
-            , rscMaxRetries = 3
+            , rscMaxRetries = RetryCount 3
             , rscBaseDelay = 1000 -- 1ms for fast tests
             }
     env <- newRemoteStorageEnvWithConfig cfg
@@ -68,7 +69,7 @@ testRetryFailure = Temp.withSystemTempDirectory "retry-test-failure" $ \tmp -> d
   let cacheDir = tmp </> "cache"
       logFile = tmp </> "retry-fail.log"
       tracer = tracerToFile logFile
-      maxRetries = 2
+      maxRetries = RetryCount 2
   createDirectoryIfMissing True cacheDir
 
   -- Use a fixed response that always fails
@@ -92,13 +93,14 @@ testRetryFailure = Temp.withSystemTempDirectory "retry-test-failure" $ \tmp -> d
         let retryLines = filter (Text.isInfixOf "TraceDownloadRetry") (Text.lines logContent)
         -- Since downloadChunk downloads 3 files and our app fails EVERY request,
         -- each of the 3 files will be retried maxRetries times.
-        let totalRetries = maxRetries * 3
+        let expTotalRetries = unRetryCount maxRetries * 3
+            obsTotalRetries = length retryLines
         assertBool
           ( "Expected exactly "
-              ++ show totalRetries
+              ++ show expTotalRetries
               ++ " retries, but got "
-              ++ show (length retryLines)
+              ++ show obsTotalRetries
               ++ ". Log:\n"
               ++ Text.unpack logContent
           )
-          (length retryLines == totalRetries)
+          (obsTotalRetries == fromIntegral expTotalRetries)

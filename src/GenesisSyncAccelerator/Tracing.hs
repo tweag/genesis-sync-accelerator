@@ -24,6 +24,7 @@ import Control.Monad.Class.MonadAsync (link)
 import Data.Text (unpack)
 import Data.Word (Word64)
 import GHC.Conc (labelThread, myThreadId)
+import GenesisSyncAccelerator.Types (RetryCount)
 import Network.Mux (BearerTrace, WithBearer)
 import Network.Socket (SockAddr)
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
@@ -75,7 +76,7 @@ data TraceRemoteStorageEvent
   | -- | Retrying download after failure.
     TraceDownloadRetry
       String
-      Int
+      RetryCount
       -- | URL, retry count, delay in microseconds
       Int
   | -- | Starting download of tip metadata.

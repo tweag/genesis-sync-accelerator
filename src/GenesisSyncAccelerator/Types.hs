@@ -1,12 +1,17 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
+-- | Domain-specific type wrappers and aliases
 module GenesisSyncAccelerator.Types
   ( HostAddr
   , MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
+  , RetryCount (..)
   , StandardBlock
   , StandardTopLevelConfig
   , TipRefreshInterval (..)
   ) where
 
+import Data.Aeson (FromJSON)
 import Data.Word (Word8)
 import Numeric.Natural
 import Ouroboros.Consensus.Cardano.Block (CardanoBlock)
@@ -23,6 +28,10 @@ newtype MaxCachedChunksCount = MaxCachedChunksCount Natural
 -- | How many chunks ahead of the current to fetch in advance
 newtype PrefetchChunksCount = PrefetchChunksCount Natural
   deriving (Eq, Show)
+
+-- | Count of number of retries for some operation
+newtype RetryCount = RetryCount {unRetryCount :: Natural}
+  deriving (Eq, FromJSON, Ord, Read, Show)
 
 -- | The block type typically used across the codebase
 type StandardBlock = CardanoBlock StandardCrypto
