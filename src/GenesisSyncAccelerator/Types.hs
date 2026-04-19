@@ -20,10 +20,6 @@ type HostAddr = (Word8, Word8, Word8, Word8)
 newtype MaxCachedChunksCount = MaxCachedChunksCount Natural
   deriving (Eq, Show)
 
--- | How often to refresh the tip from the CDN, in seconds.
-newtype TipRefreshInterval = TipRefreshInterval Natural
-  deriving (Eq, Show)
-
 -- | How many chunks ahead of the current to fetch in advance
 newtype PrefetchChunksCount = PrefetchChunksCount Natural
   deriving (Eq, Show)
@@ -33,3 +29,7 @@ type StandardBlock = CardanoBlock StandardCrypto
 
 -- | The type of main configuration object used across the codebase
 type StandardTopLevelConfig = TopLevelConfig StandardBlock
+
+-- | How often to refresh the tip from the CDN, in seconds.
+newtype TipRefreshInterval = TipRefreshInterval Natural
+  deriving (Eq, Show)
