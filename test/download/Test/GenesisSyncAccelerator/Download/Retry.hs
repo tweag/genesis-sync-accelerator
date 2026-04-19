@@ -17,7 +17,7 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
-import Test.GenesisSyncAccelerator.Utilities (tracerToFile)
+import Test.GenesisSyncAccelerator.Utilities (getLocalUrl, tracerToFile)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase)
 
@@ -48,7 +48,7 @@ testRetrySuccess = Temp.withSystemTempDirectory "retry-test-success" $ \tmp -> d
   testWithApplication (pure $ mkRetryApp counter maxFailures) $ \port -> do
     let cfg =
           RemoteStorageConfig
-            { rscSrcUrl = "http://localhost:" ++ show port
+            { rscSrcUrl = getLocalUrl port
             , rscDstDir = cacheDir
             , rscMaxRetries = 3
             , rscBaseDelay = 1000 -- 1ms for fast tests
@@ -77,7 +77,7 @@ testRetryFailure = Temp.withSystemTempDirectory "retry-test-failure" $ \tmp -> d
   testWithApplication (pure app) $ \port -> do
     let cfg =
           RemoteStorageConfig
-            { rscSrcUrl = "http://localhost:" ++ show port
+            { rscSrcUrl = getLocalUrl port
             , rscDstDir = cacheDir
             , rscMaxRetries = maxRetries
             , rscBaseDelay = 1000
