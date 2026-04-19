@@ -30,7 +30,11 @@ import GenesisSyncAccelerator.OnDemand
   )
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
-import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
+import GenesisSyncAccelerator.Types
+  ( MaxCachedChunksCount (..)
+  , PrefetchChunksCount (..)
+  , RetryCount (..)
+  )
 import GenesisSyncAccelerator.Util (fpToHasFS)
 import Ouroboros.Consensus.Block (StandardHash)
 import Ouroboros.Consensus.Block.Abstract
@@ -1025,7 +1029,12 @@ makeRuntimeWithNullRemoteAndNullLogging (TmpDir tmp) chunkInfo chunkedBlocks =
   OnDemand.newOnDemandRuntime $
     OnDemandConfig
       { odcRemote =
-          RemoteStorageConfig{rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int)), rscDstDir = tmp}
+          RemoteStorageConfig
+            { rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int))
+            , rscDstDir = tmp
+            , rscMaxRetries = RetryCount 0
+            , rscBaseDelay = 0
+            }
       , odcTracer = nullTracer
       , odcChunkInfo = chunkInfo
       , odcHasFS = fpToHasFS tmp
