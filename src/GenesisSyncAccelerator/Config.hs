@@ -19,8 +19,10 @@ import GenesisSyncAccelerator.Types
   ( HostAddr
   , MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
+  , RetryBaseDelay
   , RetryCount (..)
   , TipRefreshInterval (..)
+  , asRetryBaseDelay
   )
 import qualified Network.Socket as Socket
 import Numeric.Natural (Natural)
@@ -37,7 +39,7 @@ data ResolvedOpts = ResolvedOpts
   , resolvedPrefetchAhead :: PrefetchChunksCount
   , resolvedTipRefreshInterval :: TipRefreshInterval
   , resolvedMaxRetries :: RetryCount
-  , resolvedBaseDelay :: Int
+  , resolvedBaseDelay :: RetryBaseDelay
   }
 
 newtype RTSFrequency = RTSFrequency {unRTSFrequency :: Int}
@@ -55,7 +57,7 @@ data PartialConfig = PartialConfig
   , pcPrefetchAhead :: Maybe Natural
   , pcTipRefreshInterval :: Maybe Natural
   , pcMaxRetries :: Maybe RetryCount
-  , pcBaseDelay :: Maybe Int
+  , pcBaseDelay :: Maybe Natural
   }
 
 -- | Left-biased merge: the first argument wins when both sides are 'Just'.
@@ -145,7 +147,7 @@ resolveOpts pc =
           , resolvedPrefetchAhead = PrefetchChunksCount $ grab (pcPrefetchAhead pc)
           , resolvedTipRefreshInterval = TipRefreshInterval $ grab (pcTipRefreshInterval pc)
           , resolvedMaxRetries = grab (pcMaxRetries pc)
-          , resolvedBaseDelay = grab (pcBaseDelay pc)
+          , resolvedBaseDelay = asRetryBaseDelay $ grab (pcBaseDelay pc)
           }
     _ ->
       Left $

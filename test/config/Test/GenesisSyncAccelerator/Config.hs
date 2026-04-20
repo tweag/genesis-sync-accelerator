@@ -15,6 +15,7 @@ import GenesisSyncAccelerator.Types
   , PrefetchChunksCount (..)
   , RetryCount (..)
   , TipRefreshInterval (..)
+  , asRetryBaseDelay
   )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
@@ -46,7 +47,7 @@ testDefaults = testCase "defaults apply when only required fields are set" $ do
       resolvedPrefetchAhead opts @?= PrefetchChunksCount 3
       resolvedTipRefreshInterval opts @?= TipRefreshInterval 600
       resolvedMaxRetries opts @?= RetryCount 5
-      resolvedBaseDelay opts @?= 100000
+      resolvedBaseDelay opts @?= asRetryBaseDelay 100000
       resolvedSrcUrl opts @?= "http://cdn"
 
 -- | CLI values take precedence over config file values (left-biased merge).
@@ -81,7 +82,7 @@ testCliOverridesConfigFile = testCase "CLI overrides config file values" $ do
       resolvedMaxCachedChunks opts @?= MaxCachedChunksCount 20
       resolvedCacheDir opts @?= "/cli-cache"
       resolvedMaxRetries opts @?= RetryCount 10
-      resolvedBaseDelay opts @?= 50000
+      resolvedBaseDelay opts @?= asRetryBaseDelay 50000
 
 -- | Config file values are used when CLI omits them.
 testConfigFileFillsGaps :: TestTree

@@ -10,7 +10,7 @@ import GenesisSyncAccelerator.RemoteStorage
   , downloadChunk
   , newRemoteStorageEnvWithConfig
   )
-import GenesisSyncAccelerator.Types (RetryCount (..))
+import GenesisSyncAccelerator.Types (RetryCount (..), asRetryBaseDelay)
 import Network.HTTP.Types (status200, status503)
 import Network.Wai (Application, responseLBS)
 import Network.Wai.Handler.Warp (testWithApplication)
@@ -52,7 +52,7 @@ testRetrySuccess = Temp.withSystemTempDirectory "retry-test-success" $ \tmp -> d
             { rscSrcUrl = getLocalUrl port
             , rscDstDir = cacheDir
             , rscMaxRetries = RetryCount 3
-            , rscBaseDelay = 1000 -- 1ms for fast tests
+            , rscBaseDelay = asRetryBaseDelay 1000 -- 1 millisecond for fast tests
             }
     env <- newRemoteStorageEnvWithConfig cfg
     res <- downloadChunk tracer env (ChunkNo 1)
@@ -81,7 +81,7 @@ testRetryFailure = Temp.withSystemTempDirectory "retry-test-failure" $ \tmp -> d
             { rscSrcUrl = getLocalUrl port
             , rscDstDir = cacheDir
             , rscMaxRetries = maxRetries
-            , rscBaseDelay = 1000
+            , rscBaseDelay = asRetryBaseDelay 1000 -- 1 millisecond for fast tests
             }
     env <- newRemoteStorageEnvWithConfig cfg
     res <- downloadChunk tracer env (ChunkNo 1)

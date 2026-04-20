@@ -34,6 +34,7 @@ import GenesisSyncAccelerator.Types
   ( MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
   , RetryCount (..)
+  , asRetryBaseDelay
   )
 import GenesisSyncAccelerator.Util (fpToHasFS)
 import Ouroboros.Consensus.Block (StandardHash)
@@ -1033,7 +1034,7 @@ makeRuntimeWithNullRemoteAndNullLogging (TmpDir tmp) chunkInfo chunkedBlocks =
             { rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int))
             , rscDstDir = tmp
             , rscMaxRetries = RetryCount 0
-            , rscBaseDelay = 0
+            , rscBaseDelay = asRetryBaseDelay 1000
             }
       , odcTracer = nullTracer
       , odcChunkInfo = chunkInfo

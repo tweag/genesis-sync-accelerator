@@ -5,10 +5,13 @@ module GenesisSyncAccelerator.Types
   ( HostAddr
   , MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
+  , RetryBaseDelay
   , RetryCount (..)
   , StandardBlock
   , StandardTopLevelConfig
   , TipRefreshInterval (..)
+  , asRetryBaseDelay
+  , getRetryDelay
   ) where
 
 import Data.Aeson (FromJSON)
@@ -28,6 +31,16 @@ newtype MaxCachedChunksCount = MaxCachedChunksCount Natural
 -- | How many chunks ahead of the current to fetch in advance
 newtype PrefetchChunksCount = PrefetchChunksCount Natural
   deriving (Eq, Show)
+
+-- | The base delay (for exponential backoff) for retrying a failed operation
+newtype RetryBaseDelay = RetryBaseDelay {unRetryBaseDelay :: Natural}
+  deriving (Eq, FromJSON, Ord, Show)
+
+asRetryBaseDelay :: Natural -> RetryBaseDelay
+asRetryBaseDelay = RetryBaseDelay
+
+getRetryDelay :: RetryBaseDelay -> RetryCount -> Natural
+getRetryDelay (RetryBaseDelay base) (RetryCount n) = base * (2 ^ n)
 
 -- | Count of number of retries for some operation
 newtype RetryCount = RetryCount {unRetryCount :: Natural}

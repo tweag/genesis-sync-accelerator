@@ -27,6 +27,7 @@ import GHC.Conc (labelThread, myThreadId)
 import GenesisSyncAccelerator.Types (RetryCount)
 import Network.Mux (BearerTrace, WithBearer)
 import Network.Socket (SockAddr)
+import Numeric.Natural
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
   ( TraceBlockFetchServerEvent
   )
@@ -78,7 +79,7 @@ data TraceRemoteStorageEvent
       String
       RetryCount
       -- | URL, retry count, delay in microseconds
-      Int
+      Natural
   | -- | Starting download of tip metadata.
     TraceTipFetchStart !String
   | -- | Successfully fetched tip metadata.

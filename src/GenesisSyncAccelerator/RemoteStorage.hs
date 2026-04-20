@@ -18,9 +18,9 @@ module GenesisSyncAccelerator.RemoteStorage
   , RemoteStorageConfig (..)
   , RemoteStorageEnv (..)
   , RemoteTipInfo (..)
-  , TraceRemoteStorageEvent (..)
   , RemoteStorageTracer
   , TraceDownloadFailure (..)
+  , TraceRemoteStorageEvent (..)
   , getFileName
   , toSuffix
   , FileType (..)
@@ -43,7 +43,12 @@ import GenesisSyncAccelerator.Tracing
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-import GenesisSyncAccelerator.Types (RetryCount (..))
+import GenesisSyncAccelerator.Types
+  ( RetryBaseDelay
+  , RetryCount (..)
+  , asRetryBaseDelay
+  , getRetryDelay
+  )
 import Network.HTTP.Client hiding (Manager)
 import qualified Network.HTTP.Client as HTTP (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
@@ -60,8 +65,8 @@ data RemoteStorageConfig = RemoteStorageConfig
   -- ^ Local directory where the downloaded chunks should be stored.
   , rscMaxRetries :: RetryCount
   -- ^ Maximum number of retries for transient failures.
-  , rscBaseDelay :: Int
-  -- ^ Base delay in microseconds for exponential backoff.
+  , rscBaseDelay :: RetryBaseDelay
+  -- ^ Base delay for exponential backoff.
   }
   deriving (Eq, Show)
 
@@ -74,7 +79,7 @@ newRemoteStorageEnv url dir =
       { rscSrcUrl = url
       , rscDstDir = dir
       , rscMaxRetries = RetryCount 5
-      , rscBaseDelay = 100000
+      , rscBaseDelay = asRetryBaseDelay 100000 -- 100ms in microseconds
       }
 
 -- | Create a 'RemoteStorageEnv' from an existing 'RemoteStorageConfig'.
@@ -177,10 +182,10 @@ withRetry tr cfg url action = go (RetryCount 0)
   retry n lastRes
     | n >= maxRetries = pure (Left lastRes)
     | otherwise = do
-        let delay = baseDelay * (2 ^ unRetryCount n)
+        let delay = getRetryDelay baseDelay n
             n' = incrementRetryCount n
         traceWith tr $ TraceDownloadRetry url n' delay
-        liftIO $ threadDelay delay
+        liftIO $ threadDelay $ fromIntegral delay
         go n'
 
 tryFileRequest ::

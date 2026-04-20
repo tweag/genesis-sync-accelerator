@@ -23,7 +23,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import GenesisSyncAccelerator.OnDemand (OnDemandConfig (..))
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
-import GenesisSyncAccelerator.Types (RetryCount (..), StandardBlock)
+import GenesisSyncAccelerator.Types (RetryCount (..), StandardBlock, asRetryBaseDelay)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (Port, testWithApplication)
@@ -106,7 +106,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
             { rscSrcUrl = getLocalUrl port
             , rscDstDir = tmpdir
             , rscMaxRetries = RetryCount 0 -- Disable retries in tests by default
-            , rscBaseDelay = 0
+            , rscBaseDelay = asRetryBaseDelay 0
             }
       , odcTracer = nullTracer
       , odcChunkInfo = podcChunkInfo
