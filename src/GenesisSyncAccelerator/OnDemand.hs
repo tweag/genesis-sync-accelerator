@@ -598,7 +598,10 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component applyFro
     -- Determine per-chunk whether the first entry is an EBB by reading
     -- the primary index, rather than assuming all chunks start with EBBs.
     mbFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
-    let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
+    let firstIsEBB =
+          if ChunkLayout.chunkCanContainEBB chunkInfo chunk
+            then maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
+            else IsNotEBB
     Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
 
   flatEntries <-
