@@ -80,6 +80,7 @@
               pkgs.jq
               pkgs.iproute2
               pkgs.tmux
+              pkgs.util-linux
             ];
           };
         };
