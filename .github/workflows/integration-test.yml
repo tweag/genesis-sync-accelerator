@@ -8,7 +8,6 @@ on:
 jobs:
   integration-test:
     runs-on: [self-hosted, Linux, X64, tweag-infra]
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v6
