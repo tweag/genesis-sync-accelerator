@@ -18,9 +18,9 @@ module GenesisSyncAccelerator.RemoteStorage
   , RemoteStorageConfig (..)
   , RemoteStorageEnv (..)
   , RemoteTipInfo (..)
-  , TraceRemoteStorageEvent (..)
   , RemoteStorageTracer
   , TraceDownloadFailure (..)
+  , TraceRemoteStorageEvent (..)
   , getFileName
   , toSuffix
   , FileType (..)
@@ -43,6 +43,12 @@ import GenesisSyncAccelerator.Tracing
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
+import GenesisSyncAccelerator.Types
+  ( RetryBaseDelay
+  , RetryCount (..)
+  , asRetryBaseDelay
+  , getRetryDelay
+  )
 import Network.HTTP.Client hiding (Manager)
 import qualified Network.HTTP.Client as HTTP (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
@@ -57,10 +63,10 @@ data RemoteStorageConfig = RemoteStorageConfig
   -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable"), without trailing slash.
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
-  , rscMaxRetries :: Int
+  , rscMaxRetries :: RetryCount
   -- ^ Maximum number of retries for transient failures.
-  , rscBaseDelay :: Int
-  -- ^ Base delay in microseconds for exponential backoff.
+  , rscBaseDelay :: RetryBaseDelay
+  -- ^ Base delay for exponential backoff.
   }
   deriving (Eq, Show)
 
@@ -72,8 +78,8 @@ newRemoteStorageEnv url dir =
     RemoteStorageConfig
       { rscSrcUrl = url
       , rscDstDir = dir
-      , rscMaxRetries = 5
-      , rscBaseDelay = 100000
+      , rscMaxRetries = RetryCount 5
+      , rscBaseDelay = asRetryBaseDelay 100000 -- 100ms in microseconds
       }
 
 -- | Create a 'RemoteStorageEnv' from an existing 'RemoteStorageConfig'.
@@ -151,6 +157,9 @@ fetchTipInfo tracer env =
     env
     "tip.json"
 
+incrementRetryCount :: RetryCount -> RetryCount
+incrementRetryCount (RetryCount n) = RetryCount (n + 1)
+
 -- | Retry an action with exponential backoff if it fails with a transient error.
 withRetry ::
   MonadIO m =>
@@ -159,7 +168,7 @@ withRetry ::
   String ->
   m (Either TraceDownloadFailure a) ->
   m (Either TraceDownloadFailure a)
-withRetry tr cfg url action = go 0
+withRetry tr cfg url action = go (RetryCount 0)
  where
   maxRetries = rscMaxRetries cfg
   baseDelay = rscBaseDelay cfg
@@ -173,10 +182,11 @@ withRetry tr cfg url action = go 0
   retry n lastRes
     | n >= maxRetries = pure (Left lastRes)
     | otherwise = do
-        let delay = baseDelay * (2 ^ n)
-        traceWith tr $ TraceDownloadRetry url (n + 1) delay
-        liftIO $ threadDelay delay
-        go (n + 1)
+        let delay = getRetryDelay baseDelay n
+            n' = incrementRetryCount n
+        traceWith tr $ TraceDownloadRetry url n' delay
+        liftIO $ threadDelay $ fromIntegral delay
+        go n'
 
 tryFileRequest ::
   forall m result.
