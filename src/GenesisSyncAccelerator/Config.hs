@@ -35,6 +35,7 @@ data ResolvedOpts = ResolvedOpts
   , resolvedMaxCachedChunks :: MaxCachedChunksCount
   , resolvedPrefetchAhead :: PrefetchChunksCount
   , resolvedTipRefreshInterval :: TipRefreshInterval
+  , resolvedDisableLogging :: Bool
   }
 
 newtype RTSFrequency = RTSFrequency {unRTSFrequency :: Int}
@@ -51,6 +52,7 @@ data PartialConfig = PartialConfig
   , pcMaxCachedChunks :: Maybe Natural
   , pcPrefetchAhead :: Maybe Natural
   , pcTipRefreshInterval :: Maybe Natural
+  , pcDisableLogging :: Maybe Bool
   }
 
 -- | Left-biased merge: the first argument wins when both sides are 'Just'.
@@ -66,6 +68,7 @@ instance Semigroup PartialConfig where
       , pcMaxCachedChunks = pcMaxCachedChunks a <|> pcMaxCachedChunks b
       , pcPrefetchAhead = pcPrefetchAhead a <|> pcPrefetchAhead b
       , pcTipRefreshInterval = pcTipRefreshInterval a <|> pcTipRefreshInterval b
+      , pcDisableLogging = pcDisableLogging a <|> pcDisableLogging b
       }
 
 instance Monoid PartialConfig where
@@ -80,6 +83,7 @@ instance Monoid PartialConfig where
       , pcMaxCachedChunks = Nothing
       , pcPrefetchAhead = Nothing
       , pcTipRefreshInterval = Nothing
+      , pcDisableLogging = Nothing
       }
 
 -- | Default values for all optional configuration fields.
@@ -94,6 +98,7 @@ defaultConfig =
     , pcMaxCachedChunks = Just 10
     , pcPrefetchAhead = Just 3
     , pcTipRefreshInterval = Just 600
+    , pcDisableLogging = Just False
     }
 
 instance FromJSON PartialConfig where
@@ -108,6 +113,7 @@ instance FromJSON PartialConfig where
       <*> o .:? "max-cached-chunks"
       <*> o .:? "prefetch-ahead"
       <*> o .:? "tip-refresh-interval"
+      <*> o .:? "disable-logging"
    where
     parseAddrJSON s = case parseAddr s of
       Right a -> pure a
@@ -131,6 +137,7 @@ resolveOpts pc =
           , resolvedMaxCachedChunks = MaxCachedChunksCount $ grab (pcMaxCachedChunks pc)
           , resolvedPrefetchAhead = PrefetchChunksCount $ grab (pcPrefetchAhead pc)
           , resolvedTipRefreshInterval = TipRefreshInterval $ grab (pcTipRefreshInterval pc)
+          , resolvedDisableLogging = fromMaybe False (pcDisableLogging pc)
           }
     _ ->
       Left $

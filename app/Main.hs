@@ -27,7 +27,7 @@ import Options.Applicative
 import System.Directory (XdgDirectory (XdgCache), getXdgDirectory)
 import System.Exit (exitFailure)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
+import "contra-tracer" Control.Tracer (nullTracer, showTracing, stdoutTracer, traceWith)
 
 main :: IO ()
 main = withStdTerminalHandles $ do
@@ -45,20 +45,23 @@ main = withStdTerminalHandles $ do
       exitFailure
     Right o -> pure o
   let sockAddr = resolveAddr opts
-  let tracers =
+  let baseTracer
+        | resolvedDisableLogging opts = nullTracer
+        | otherwise = stdoutTracer
+      tracers =
         Tracers
-          { blockFetchMessageTracer = showTracing stdoutTracer
-          , blockFetchEventTracer = showTracing stdoutTracer
-          , chainSyncMessageTracer = showTracing stdoutTracer
-          , chainSyncEventTracer = showTracing stdoutTracer
-          , remoteStorageTracer = showTracing stdoutTracer
-          , handshakeTracer = showTracing stdoutTracer
-          , bearerTracer = showTracing stdoutTracer
+          { blockFetchMessageTracer = showTracing baseTracer
+          , blockFetchEventTracer = showTracing baseTracer
+          , chainSyncMessageTracer = showTracing baseTracer
+          , chainSyncEventTracer = showTracing baseTracer
+          , remoteStorageTracer = showTracing baseTracer
+          , handshakeTracer = showTracing baseTracer
+          , bearerTracer = showTracing baseTracer
           }
   pInfoConfig <- getTopLevelConfig (resolvedNodeConfig opts)
-  traceWith stdoutTracer $
+  traceWith baseTracer $
     "Running ImmDB server at " ++ printHost (resolvedAddr opts, resolvedPort opts)
-  startResourceTracer stdoutTracer (unRTSFrequency (resolvedRtsFrequency opts))
+  startResourceTracer baseTracer (unRTSFrequency (resolvedRtsFrequency opts))
   let remoteCfg = RemoteStorage.RemoteStorageConfig (resolvedSrcUrl opts) (resolvedCacheDir opts)
   absurd
     <$> Diffusion.run
@@ -161,6 +164,14 @@ optsParser =
             [ long "tip-refresh-interval"
             , help "How often to re-fetch the tip from the CDN, in seconds (default: 600)"
             ]
+    pcDisableLogging <-
+      Just
+        <$> switch
+          ( mconcat
+              [ long "disable-logging"
+              , help "Disable all logging output"
+              ]
+          )
     pure
       ( gsaConfigPath
       , PartialConfig
@@ -173,5 +184,6 @@ optsParser =
           , pcMaxCachedChunks
           , pcPrefetchAhead
           , pcTipRefreshInterval
+          , pcDisableLogging
           }
       )
