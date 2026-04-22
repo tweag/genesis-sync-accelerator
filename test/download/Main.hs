@@ -2,6 +2,7 @@ module Main (main) where
 
 import qualified Test.GenesisSyncAccelerator.Download.Chunks
 import qualified Test.GenesisSyncAccelerator.Download.RemoteTip
+import qualified Test.GenesisSyncAccelerator.Download.Retry
 import Test.Tasty (TestTree, defaultMain, testGroup)
 
 main :: IO ()
@@ -13,4 +14,5 @@ tests =
     "download"
     [ Test.GenesisSyncAccelerator.Download.Chunks.tests
     , Test.GenesisSyncAccelerator.Download.RemoteTip.tests
+    , Test.GenesisSyncAccelerator.Download.Retry.tests
     ]

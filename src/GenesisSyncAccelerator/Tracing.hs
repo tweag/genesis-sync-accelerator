@@ -24,8 +24,10 @@ import Control.Monad.Class.MonadAsync (link)
 import Data.Text (unpack)
 import Data.Word (Word64)
 import GHC.Conc (labelThread, myThreadId)
+import GenesisSyncAccelerator.Types (RetryCount)
 import Network.Mux (BearerTrace, WithBearer)
 import Network.Socket (SockAddr)
+import Numeric.Natural
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server
   ( TraceBlockFetchServerEvent
   )
@@ -72,6 +74,12 @@ data TraceRemoteStorageEvent
     TraceDownloadSuccess String Word64
   | -- | Failed to download a file.
     TraceDownloadFailure TraceDownloadFailure
+  | -- | Retrying download after failure.
+    -- URL, retry count, delay in microseconds
+    TraceDownloadRetry
+      String
+      RetryCount
+      Natural
   | -- | Starting download of tip metadata.
     TraceTipFetchStart !String
   | -- | Successfully fetched tip metadata.
