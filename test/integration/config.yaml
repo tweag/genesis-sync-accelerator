@@ -3,6 +3,7 @@
 # Only max-cached-chunks and rts-frequency are actually used from here;
 max-cached-chunks: 25
 rts-frequency: 2000
+disable-logging: false
 
 # The integration test overrides node-config, rs-src-url, port, and
 # cache-dir via CLI flags, which take precedence over this file.
