@@ -75,10 +75,10 @@ data TraceRemoteStorageEvent
   | -- | Failed to download a file.
     TraceDownloadFailure TraceDownloadFailure
   | -- | Retrying download after failure.
+    -- URL, retry count, delay in microseconds
     TraceDownloadRetry
       String
       RetryCount
-      -- | URL, retry count, delay in microseconds
       Natural
   | -- | Starting download of tip metadata.
     TraceTipFetchStart !String
