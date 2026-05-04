@@ -104,6 +104,36 @@ executable immdb-get-tip
     optparse-applicative,
     with-utf8,
 
+executable gsa-bench
+  import: common-all
+  hs-source-dirs: tools
+  main-is: gsa-bench.hs
+  ghc-options:
+    -threaded
+    -rtsopts
+    "-with-rtsopts=-N -I0 -A16m"
+
+  build-depends:
+    async,
+    bytestring,
+    cardano-crypto-class,
+    containers,
+    contra-tracer,
+    genesis-sync-accelerator,
+    network,
+    network-mux,
+    optparse-applicative,
+    ouroboros-consensus,
+    ouroboros-consensus-cardano,
+    ouroboros-consensus-diffusion,
+    ouroboros-network,
+    ouroboros-network-api,
+    ouroboros-network-framework,
+    ouroboros-network-protocols,
+    stm,
+    time,
+    with-utf8,
+
 library
   import: common-all
   hs-source-dirs: src
