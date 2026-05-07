@@ -36,14 +36,12 @@ import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar,
 import Control.Exception (Exception, throw)
 import Control.Monad (unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import qualified Data.Bifunctor as Bifunctor
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
 import qualified Data.List.NonEmpty as NEL
 import qualified Data.Map.Strict as Map
-import Data.Maybe (listToMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -317,24 +315,19 @@ mkOnDemandIterator
                   , cs
                   , \c es ->
                       if isLast c
-                        then
-                          checkEntryMatch
-                            odcChunkInfo
-                            toSlot
-                            toHash
-                            (\entries -> if null entries then Nothing else Just (last entries))
-                            (takeWhile (\(WithBlockSize _ e) -> getEntrySlot odcChunkInfo e <= toSlot) es)
+                        then truncateAtUpperBound odcChunkInfo toSlot toHash es
                         else Right es
                   , isLast
                   )
         applyFrom :: ChunkNo -> [SizedEntry blk] -> Either (IllegalStreamOperation blk) [SizedEntry blk]
-        applyFrom c es = if c == NEL.head chunks then finalizeFrom <$> validateFrom (getFrom es) else Right es
+        applyFrom c es = if c == NEL.head chunks then finalizeFrom <$> validateFrom es else Right es
          where
-          dropInit fromSlot = dropWhile $ \(WithBlockSize _ e) -> getEntrySlot odcChunkInfo e < fromSlot
-          (getFrom, validateFrom, finalizeFrom) = case from of
-            StreamFromExclusive GenesisPoint -> (id, Right, id)
-            StreamFromExclusive (BlockPoint fromSlot fromHash) -> (dropInit fromSlot, checkEntryMatch odcChunkInfo fromSlot fromHash listToMaybe, drop 1)
-            StreamFromInclusive (RealPoint fromSlot fromHash) -> (dropInit fromSlot, checkEntryMatch odcChunkInfo fromSlot fromHash listToMaybe, id)
+          (validateFrom, finalizeFrom) = case from of
+            StreamFromExclusive GenesisPoint -> (Right, id)
+            StreamFromExclusive (BlockPoint fromSlot fromHash) ->
+              (dropUntilLowerBound odcChunkInfo fromSlot fromHash, drop 1)
+            StreamFromInclusive (RealPoint fromSlot fromHash) ->
+              (dropUntilLowerBound odcChunkInfo fromSlot fromHash, id)
 
     -- Initialize state for chunks left to process and the current chunk iterator.
     varChunks <- newTVarIO $ NEL.toList chunks
@@ -696,21 +689,49 @@ deriving instance (StandardHash blk, Typeable blk) => Exception (IllegalStreamOp
 
 type SizedEntry blk = WithBlockSize (Entry blk)
 
-checkEntryMatch ::
+-- | Drop entries until the (slot, hash) match. Searching by hash, not
+-- position, is required because Byron EBBs and the first main block of an
+-- epoch share a slot.
+dropUntilLowerBound ::
   Eq (HeaderHash blk) =>
   ChunkInfo ->
   SlotNo ->
   HeaderHash blk ->
-  ([SizedEntry blk] -> Maybe (SizedEntry blk)) ->
   [SizedEntry blk] ->
   Either (IllegalStreamOperation blk) [SizedEntry blk]
-checkEntryMatch ci s h getE es =
-  Bifunctor.first (StreamBoundNotFound (s, h)) $
-    maybe
-      (Left Nothing)
-      ( \(WithBlockSize _ e) -> if (getEntrySlot ci e, headerHash e) == (s, h) then Right es else Left (Just e)
-      )
-      (getE es)
+dropUntilLowerBound ci fromSlot fromHash = go Nothing
+ where
+  -- 'mbNear' = most recent same-slot non-match, reported in StreamBoundNotFound.
+  go mbNear [] = Left (StreamBoundNotFound (fromSlot, fromHash) mbNear)
+  go mbNear (e@(WithBlockSize _ entry) : rest) =
+    case compare (getEntrySlot ci entry) fromSlot of
+      LT -> go mbNear rest
+      EQ
+        | headerHash entry == fromHash -> Right (e : rest)
+        | otherwise -> go (Just entry) rest
+      GT -> Left (StreamBoundNotFound (fromSlot, fromHash) (Just entry))
+
+-- | Truncate at the (slot, hash) match. As with 'dropUntilLowerBound',
+-- searching by hash (not @last . takeWhile slot <= toSlot@) is required
+-- because Byron EBBs and the first main block of an epoch share a slot.
+truncateAtUpperBound ::
+  Eq (HeaderHash blk) =>
+  ChunkInfo ->
+  SlotNo ->
+  HeaderHash blk ->
+  [SizedEntry blk] ->
+  Either (IllegalStreamOperation blk) [SizedEntry blk]
+truncateAtUpperBound ci toSlot toHash = go [] Nothing
+ where
+  -- 'mbNear' = most recent same-slot non-match (see 'dropUntilLowerBound').
+  go _ mbNear [] = Left (StreamBoundNotFound (toSlot, toHash) mbNear)
+  go acc mbNear (e@(WithBlockSize _ entry) : rest) =
+    case compare (getEntrySlot ci entry) toSlot of
+      LT -> go (e : acc) mbNear rest
+      EQ
+        | headerHash entry == toHash -> Right (reverse (e : acc))
+        | otherwise -> go (e : acc) (Just entry) rest
+      GT -> Left (StreamBoundNotFound (toSlot, toHash) (Just entry))
 
 tipFromRemoteEnv ::
   forall blk.

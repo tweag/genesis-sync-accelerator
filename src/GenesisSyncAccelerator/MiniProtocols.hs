@@ -19,13 +19,12 @@ module GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator) where
 
 import qualified Codec.CBOR.Decoding as CBOR
 import qualified Codec.CBOR.Encoding as CBOR
-import Control.Monad (when)
+import Control.Monad (when, (>=>))
 import Control.Monad.IO.Class (MonadIO)
 import Control.ResourceRegistry
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Functor ((<&>))
-import Data.List (find)
 import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 import GHC.Generics (Generic)
@@ -275,9 +274,43 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
 
         followerClose = ImmutableDB.iteratorClose =<< readTVarIO varIterator
 
+        -- On-chain test: open an inclusive iterator and peek the first entry.
+        -- Same idiom as ouroboros-consensus's 'Impl.Follower.forward', which
+        -- uses 'streamAfterPoint' as its existence check. A hash mismatch
+        -- throws 'IllegalStreamOperation', which we catch as "not on chain".
+        isPointInChain GenesisPoint = pure True
+        isPointInChain (BlockPoint slot hash) =
+          try probe >>= \case
+            Left (_ :: OnDemand.IllegalStreamOperation blk) -> pure False
+            Right ok -> pure ok
+         where
+          probe =
+            bracket
+              ( OnDemand.onDemandIteratorFrom
+                  onDemand
+                  blockComponent
+                  (StreamFromInclusive (RealPoint slot hash))
+              )
+              ImmutableDB.iteratorClose
+              $ ImmutableDB.iteratorNext >=> \case
+                ImmutableDB.IteratorExhausted -> pure False
+                ImmutableDB.IteratorResult a ->
+                  pure $ case ChainDB.point a of
+                    BlockPoint pSlot pHash -> pSlot == slot && pHash == hash
+                    GenesisPoint -> False
+
+        findUsableIntersection mbTip = go
+         where
+          go [] = pure Nothing
+          go (pt : rest)
+            | not (withinTip mbTip pt) = go rest
+            | otherwise = do
+                onChain <- isPointInChain pt
+                if onChain then pure (Just pt) else go rest
+
         followerForward pts = do
           mbTip <- atomically $ OnDemand.readOnDemandTip onDemand
-          case find (withinTip mbTip) pts of
+          findUsableIntersection mbTip pts >>= \case
             Nothing -> pure Nothing
             Just pt ->
               OnDemand.onDemandIteratorFrom onDemand blockComponent (StreamFromExclusive pt) >>= \iterator -> do
