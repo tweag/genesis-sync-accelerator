@@ -76,9 +76,9 @@ import Ouroboros.Network.Block
   , Tip (..)
   , getTipPoint
   )
+import Ouroboros.Network.Driver.Simple (runPeer)
 import qualified Ouroboros.Network.IOManager as IOManager
 import Ouroboros.Network.Magic (NetworkMagic)
-import Ouroboros.Network.Driver.Simple (runPeer)
 import Ouroboros.Network.Mux
   ( MiniProtocol (..)
   , MiniProtocolCb (..)
@@ -275,8 +275,9 @@ chainSyncBenchClient ::
   ClientState ->
   ChainSyncClient (Header Blk) (Point Blk) (Tip Blk) IO ()
 chainSyncBenchClient st =
-  ChainSyncClient $ pure $
-    SendMsgFindIntersect [GenesisPoint] intersect
+  ChainSyncClient $
+    pure $
+      SendMsgFindIntersect [GenesisPoint] intersect
  where
   updateTipThen :: Tip Blk -> ChainSyncClient (Header Blk) (Point Blk) (Tip Blk) IO ()
   updateTipThen tip = ChainSyncClient $ do
@@ -314,11 +315,11 @@ chainSyncBenchClient st =
             writeTBQueue (csHeaderQ st) pt
           runChainSyncClient requestLoop
       , recvMsgRollBackward = \_pt tip -> updateTipThen tip
-        -- Rollbacks in practice only happen once (server rolls us back to
-        -- the negotiated Genesis intersection), and our queue is empty at
-        -- that point, so no draining needed. For a real mid-chain rollback
-        -- we'd need to remove any queued Points strictly after @_pt@, but
-        -- that case doesn't occur when benching against an ImmutableDB.
+      -- Rollbacks in practice only happen once (server rolls us back to
+      -- the negotiated Genesis intersection), and our queue is empty at
+      -- that point, so no draining needed. For a real mid-chain rollback
+      -- we'd need to remove any queued Points strictly after @_pt@, but
+      -- that case doesn't occur when benching against an ImmutableDB.
       }
 
 -- ----- BlockFetch client: batched range requests -----------------------------
@@ -353,7 +354,7 @@ blockFetchBenchClient batchSize st = BlockFetchClient nextRequest
                 else retry
     case decision of
       Stop -> pure (SendMsgClientDone ())
-      Fetch [] -> pure (SendMsgClientDone ())  -- unreachable: drainN only called when qLenI > 0
+      Fetch [] -> pure (SendMsgClientDone ()) -- unreachable: drainN only called when qLenI > 0
       Fetch pts@(from_ : _) -> do
         let to_ = lastOf pts from_
         pure $
@@ -364,8 +365,8 @@ blockFetchBenchClient batchSize st = BlockFetchClient nextRequest
 
   -- Total replacement for @last@ — non-partial, requires a default.
   lastOf :: [a] -> a -> a
-  lastOf []       d = d
-  lastOf [x]      _ = x
+  lastOf [] d = d
+  lastOf [x] _ = x
   lastOf (_ : xs) d = lastOf xs d
 
   drainN :: Int -> STM [Point Blk]
@@ -409,8 +410,8 @@ noopKeepAliveClient = KeepAliveClient (atomically retry)
 -- blockFetch/txSubmission), using the same numbers, limits, and serialised
 -- codecs.
 benchApplication ::
+  -- | batchSize (passed through to blockFetchBenchClient)
   Int ->
-  -- ^ batchSize (passed through to blockFetchBenchClient)
   TopLevelConfig Blk ->
   ClientState ->
   Versions
@@ -499,8 +500,8 @@ benchApplication batchSize cfg st =
 -- ─── Client runner ───────────────────────────────────────────────────────────
 
 runBenchClient ::
+  -- | batchSize
   Int ->
-  -- ^ batchSize
   Snocket.Snocket IO Socket.Socket Socket.SockAddr ->
   TopLevelConfig Blk ->
   Socket.SockAddr ->
@@ -729,4 +730,3 @@ resolveAddr host port = do
     [] -> do
       hPutStrLn stderr $ "could not resolve host " <> host
       exitFailure
-
