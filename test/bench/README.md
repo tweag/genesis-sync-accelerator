@@ -2,6 +2,7 @@
 
 Self-contained workflow for driving GSA against a real mainnet ImmutableDB
 on the host machine. `gsa-bench` measures synthetic throughput;
+`sync-bench.sh` measures wall-clock sync time against `cardano-node`;
 `run-local.sh` boots the full local stack (MinIO, GSA, cardano-node) so
 either bench can run end-to-end without manual orchestration.
 
@@ -79,6 +80,58 @@ genesis-sync-accelerator \
   --port 8781
 ```
 
+### Sync-rate characterization (`sync-bench.sh`)
+
+Captures a per-block dataset of wall-clock sync time alongside block
+content (era, tx count, block size, …). Output schema:
+
+```
+results/<UTC-timestamp>/
+  sync-timing.csv     applied_at_unix_ms,slot,hash  (live; one row per CopiedBlockToImmutableDB)
+  block-features.csv  block_no, slot, hash, header_size, block_size, num_txs, txs_size,
+                      num_tx_inputs, num_tx_outputs, script_exec_steps, script_exec_mem,
+                      plutus_v{1,2,3}_steps, plutus_v{1,2,3}_mem,
+                      num_reference_inputs, num_reference_scripts, num_inline_datums
+  dataset.csv         joined; per-block apply_delta_ms + features + era + cumulative_utxo_delta
+  run-meta.json       snapshot tip, GSA + node versions, machine info, elapsed time
+  node.log, gsa.log   raw, kept for forensic re-parsing
+```
+
+The harness tracks per-block apply timing live by patching the trace
+config to emit `ChainDB.CopyToImmutableDBEvent.CopiedBlockToImmutableDB`
+at severity Debug with no rate cap. Per-block features are extracted
+post-sync by `block-features` (a small ouroboros-consensus walker we
+build from `tools/block-features.hs`) — `extract-features.sh` is a thin
+wrapper around it.
+
+```bash
+nix develop .#integration-test
+cabal build all   # builds genesis-sync-accelerator + block-features
+
+# Validation run — small, just to exercise the pipeline.
+STOP_AFTER_CHUNKS=10 bash test/bench/sync-bench.sh
+
+# Longer run — covers Byron + Byron→Shelley boundary.
+STOP_AFTER_CHUNKS=600 bash test/bench/sync-bench.sh
+
+# Full snapshot sync. Look up the snapshot tip slot first:
+#   jq .slot $HOME/gsa-snapshot/config/peer-snapshot.json
+STOP_AFTER_CHUNKS=999999 STOP_AT_TIP_SLOT=<tip> STALL_TIMEOUT=86400 \
+  bash test/bench/sync-bench.sh
+```
+
+Sanity checks on the output:
+
+```bash
+RES=$(ls -td test/bench/results/* | head -1)
+wc -l $RES/{sync-timing,block-features,dataset}.csv
+# row counts of timing and features should be equal ± a handful;
+# dataset should match features.
+
+awk -F, 'NR>1 {print $NF}' $RES/dataset.csv | sort | uniq -c
+# rows per era — should show byron and shelley if you crossed slot 4_492_800.
+```
+
 ## Environment variables
 
 ### `run-local.sh`
@@ -99,6 +152,17 @@ genesis-sync-accelerator \
 | `STOP_AFTER_CHUNKS` | `5` | Halt once node-db/immutable has this many chunks |
 | `STOP_AT_TIP_SLOT` | unset | Alternative halt condition: node tip slot ≥ this value |
 | `STALL_TIMEOUT` | `1800` | Hard ceiling in seconds for the monitor loop |
+
+### `sync-bench.sh`
+
+Same env as `run-local.sh`, plus:
+
+| Var | Default | Description |
+|---|---|---|
+| `STOP_AFTER_CHUNKS` | `10` | Higher than `run-local.sh`'s default; bump to ~600 to cross Byron→Shelley, or unset and use `STOP_AT_TIP_SLOT` |
+| `STALL_TIMEOUT` | `7200` | Hard ceiling for the monitor loop, suitable for a longer run |
+| `RESULTS_ROOT` | `./results/` | Per-run subdirs are created under here |
+| `FRESH_WORKDIR` | `1` | `0` to **resume** from the previous run's node-db. The orchestrator seeds the new `sync-timing.csv` with the most recent prior one and asks `parse-timing.awk` to append, so the joined `dataset.csv` covers the full timeline (initial run + extension) |
 
 ### `sweep-matrix.sh`
 
