@@ -9,7 +9,7 @@
 
 module Test.GenesisSyncAccelerator.OnDemand.Iteration (tests) where
 
-import Cardano.Slotting.Slot (SlotNo (..))
+import Cardano.Slotting.Slot (EpochNo (..), SlotNo (..))
 import qualified Codec.CBOR.Write as CBOR
 import Codec.Serialise (Serialise (encode))
 import Control.Exception (try)
@@ -27,6 +27,9 @@ import GenesisSyncAccelerator.OnDemand
   , OnDemandConfig (..)
   , OnDemandRuntime (..)
   , OnDemandState (..)
+  , SizedEntry
+  , dropUntilLowerBound
+  , truncateAtUpperBound
   )
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
@@ -68,13 +71,13 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary as Secondary
   ( writeAllEntries
   )
-import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (BlockOrEBB (..))
+import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (BlockOrEBB (..), WithBlockSize (..))
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util (fsPathChunkFile, fsPathPrimaryIndexFile)
 import Ouroboros.Consensus.Storage.Serialisation (HasBinaryBlockInfo (..))
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (readTVarIO, writeTVar)
 import System.FS.API (AllowExisting (MustBeNew), HasFS, OpenMode (..), withFile)
 import System.FS.API.Types (Handle)
-import System.FS.CRC (CRC, hPutAllCRC)
+import System.FS.CRC (CRC (..), hPutAllCRC)
 import System.FS.IO (HandleIO)
 import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
@@ -82,6 +85,7 @@ import Test.GenesisSyncAccelerator.Types (TmpDir (..))
 import Test.GenesisSyncAccelerator.Utilities (blockChunk, getLocalUrl, groupBlocksByChunk)
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 import Test.Tasty.QuickCheck (testProperty)
 import Test.Util.TestBlock
   ( TestBlock
@@ -1102,6 +1106,90 @@ writeOneBlockOnly ::
 writeOneBlockOnly hasFS currentChunkHandle = hPutAllCRC hasFS currentChunkHandle . CBOR.toLazyByteString . encode
 
 ----------------------------------------------------------------------------------------------------------------------
+-- Stream-bound regression tests (shared-slot EBB + first main block) ----------------------------------------------
+----------------------------------------------------------------------------------------------------------------------
+
+-- ChunkInfo where EBB epoch 0 maps to slot 0, sharing it with the first main block.
+sharedSlotChunkInfo :: ChunkInfo
+sharedSlotChunkInfo = UniformChunkSize $ ChunkSize True 10
+
+mkEntry :: BlockOrEBB -> TestHash -> SizedEntry TestBlock
+mkEntry boe hash =
+  WithBlockSize 0 $
+    Entry
+      { blockOffset = BlockOffset 0
+      , headerOffset = HeaderOffset 0
+      , headerSize = HeaderSize 0
+      , checksum = CRC 0
+      , headerHash = hash
+      , blockOrEBB = boe
+      }
+
+ebbHash, mainHash, slot1Hash :: TestHash
+ebbHash = testHashFromList [1]
+mainHash = testHashFromList [2]
+slot1Hash = testHashFromList [3]
+
+-- EBB and main block both at slot 0, plus a main block at slot 1.
+sharedSlotEntries :: [SizedEntry TestBlock]
+sharedSlotEntries =
+  [ mkEntry (EBB (EpochNo 0)) ebbHash
+  , mkEntry (Block (SlotNo 0)) mainHash
+  , mkEntry (Block (SlotNo 1)) slot1Hash
+  ]
+
+unit_dropUntilLowerBound_picksMainBlockAtSharedSlot :: IO ()
+unit_dropUntilLowerBound_picksMainBlockAtSharedSlot =
+  case dropUntilLowerBound sharedSlotChunkInfo (SlotNo 0) mainHash sharedSlotEntries of
+    Right (WithBlockSize _ e : _) -> headerHash e @?= mainHash
+    other -> fail $ "expected suffix starting at main block, got " ++ show other
+
+unit_dropUntilLowerBound_picksEBBAtSharedSlot :: IO ()
+unit_dropUntilLowerBound_picksEBBAtSharedSlot =
+  case dropUntilLowerBound sharedSlotChunkInfo (SlotNo 0) ebbHash sharedSlotEntries of
+    Right (WithBlockSize _ e : _) -> headerHash e @?= ebbHash
+    other -> fail $ "expected suffix starting at EBB, got " ++ show other
+
+unit_dropUntilLowerBound_reportsNearMissOnExhaustion :: IO ()
+unit_dropUntilLowerBound_reportsNearMissOnExhaustion =
+  let bogus = testHashFromList [99]
+      onlySharedSlot = take 2 sharedSlotEntries
+   in case dropUntilLowerBound sharedSlotChunkInfo (SlotNo 0) bogus onlySharedSlot of
+        Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
+          s @?= SlotNo 0
+          h @?= bogus
+          assertBool "near-miss must be a slot-0 entry" $
+            headerHash near `elem` [ebbHash, mainHash]
+        other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
+
+unit_truncateAtUpperBound_picksEBBAtSharedSlot :: IO ()
+unit_truncateAtUpperBound_picksEBBAtSharedSlot =
+  case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) ebbHash sharedSlotEntries of
+    Right entries -> map (headerHash . sizedEntry) entries @?= [ebbHash]
+    other -> fail $ "expected prefix [EBB], got " ++ show other
+
+unit_truncateAtUpperBound_picksMainBlockAtSharedSlot :: IO ()
+unit_truncateAtUpperBound_picksMainBlockAtSharedSlot =
+  case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) mainHash sharedSlotEntries of
+    Right entries -> map (headerHash . sizedEntry) entries @?= [ebbHash, mainHash]
+    other -> fail $ "expected prefix [EBB, main], got " ++ show other
+
+unit_truncateAtUpperBound_reportsNearMissOnExhaustion :: IO ()
+unit_truncateAtUpperBound_reportsNearMissOnExhaustion =
+  let bogus = testHashFromList [99]
+      onlySharedSlot = take 2 sharedSlotEntries
+   in case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) bogus onlySharedSlot of
+        Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
+          s @?= SlotNo 0
+          h @?= bogus
+          assertBool "near-miss must be a slot-0 entry" $
+            headerHash near `elem` [ebbHash, mainHash]
+        other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
+
+sizedEntry :: SizedEntry blk -> Entry blk
+sizedEntry (WithBlockSize _ e) = e
+
+----------------------------------------------------------------------------------------------------------------------
 -- Property aggregation for export -----------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------
 
@@ -1163,4 +1251,22 @@ tests =
     , testProperty
         "onDemandIteratorForRange errors correctly when lower bound exists and upper bound chunk exists but not the block itself"
         prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChunkExistsButNotUpperBoundBlockItself
+    , testCase
+        "dropUntilLowerBound picks the main block at a slot shared with an EBB"
+        unit_dropUntilLowerBound_picksMainBlockAtSharedSlot
+    , testCase
+        "dropUntilLowerBound picks the EBB at a slot shared with a main block"
+        unit_dropUntilLowerBound_picksEBBAtSharedSlot
+    , testCase
+        "dropUntilLowerBound reports the same-slot near-miss on chunk exhaustion"
+        unit_dropUntilLowerBound_reportsNearMissOnExhaustion
+    , testCase
+        "truncateAtUpperBound picks the EBB at a slot shared with a main block"
+        unit_truncateAtUpperBound_picksEBBAtSharedSlot
+    , testCase
+        "truncateAtUpperBound picks the main block at a slot shared with an EBB"
+        unit_truncateAtUpperBound_picksMainBlockAtSharedSlot
+    , testCase
+        "truncateAtUpperBound reports the same-slot near-miss on chunk exhaustion"
+        unit_truncateAtUpperBound_reportsNearMissOnExhaustion
     ]

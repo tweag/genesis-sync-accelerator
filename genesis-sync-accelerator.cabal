@@ -257,6 +257,7 @@ test-suite on-demand-tests
     serialise,
     strict-checked-vars,
     tasty,
+    tasty-hunit,
     tasty-quickcheck,
     temporary,
     text,
