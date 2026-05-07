@@ -75,7 +75,7 @@
               pkgs.hsPkgs.hsPkgs.ouroboros-consensus-cardano.components.exes.db-analyser
               pkgs.minio
               pkgs.minio-client
-              pkgs.python3
+              (pkgs.python3.withPackages (ps: [ ps.matplotlib ps.numpy ]))
               pkgs.curl
               pkgs.jq
               pkgs.iproute2
