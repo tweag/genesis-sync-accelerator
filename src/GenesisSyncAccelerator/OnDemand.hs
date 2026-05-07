@@ -21,7 +21,9 @@ module GenesisSyncAccelerator.OnDemand
   , OnDemandRuntime (..)
   , OnDemandTip (..)
   , OnDemandState (..)
+  , SizedEntry
   , deleteChunkFiles
+  , dropUntilLowerBound
   , firstChunkNotAvailable
   , lastChunkNotAvailable
   , newOnDemandRuntime
@@ -29,6 +31,7 @@ module GenesisSyncAccelerator.OnDemand
   , onDemandIteratorFrom
   , readOnDemandTip
   , refreshTip
+  , truncateAtUpperBound
   ) where
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
