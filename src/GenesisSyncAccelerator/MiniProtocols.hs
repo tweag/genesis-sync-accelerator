@@ -22,7 +22,6 @@ import qualified Codec.CBOR.Encoding as CBOR
 import Control.Monad (when, (>=>))
 import Control.Monad.IO.Class (MonadIO)
 import Control.ResourceRegistry
-import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
@@ -44,9 +43,7 @@ import qualified Ouroboros.Consensus.Storage.ChainDB.API as ChainDB
 import Ouroboros.Consensus.Storage.Common
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.API as ImmutableDB
 import Ouroboros.Consensus.Storage.Serialisation
-  ( DecodeDisk
-  , DecodeDiskDep
-  , ReconstructNestedCtxt
+  ( ReconstructNestedCtxt
   )
 import Ouroboros.Consensus.Util
 import Ouroboros.Consensus.Util.IOLike
@@ -80,8 +77,6 @@ genesisSyncAccelerator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ShowProxy blk
   , SerialiseNodeToNodeConstraints blk
@@ -197,8 +192,6 @@ chainSyncServer ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
@@ -342,8 +335,6 @@ blockFetchServer ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
