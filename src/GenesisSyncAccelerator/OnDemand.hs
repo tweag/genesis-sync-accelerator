@@ -39,8 +39,8 @@ import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar,
 import Control.Exception (Exception, throw)
 import Control.Monad (unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Short as Short
 import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
 import qualified Data.List.NonEmpty as NEL
@@ -62,7 +62,6 @@ import Ouroboros.Consensus.Block
   , Header
   , HeaderHash
   , IsEBB (..)
-  , NestedCtxt
   , Point (BlockPoint, GenesisPoint)
   , RealPoint (..)
   , SlotNo (..)
@@ -71,7 +70,7 @@ import Ouroboros.Consensus.Block
   , realPointSlot
   )
 import Ouroboros.Consensus.Storage.Common
-  ( BlockComponent
+  ( BlockComponent (..)
   , StreamFrom (..)
   , StreamTo (..)
   , validBounds
@@ -80,14 +79,17 @@ import Ouroboros.Consensus.Storage.ImmutableDB.API
   ( Iterator (..)
   , IteratorResult (..)
   )
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout
+  ( slotNoOfBlockOrEBB
+  )
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Primary as Primary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary as Secondary
-import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Iterator (extractBlockComponent)
-import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (WithBlockSize (..))
+import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (WithBlockSize (..), isBlockOrEBB)
+import Ouroboros.Network.SizeInBytes (SizeInBytes (..))
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util
   ( fsPathChunkFile
   , fsPathPrimaryIndexFile
@@ -111,7 +113,8 @@ import Ouroboros.Consensus.Util.IOLike
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
 import System.FS.API
-  ( Handle
+  ( AbsOffset (..)
+  , Handle
   , HasFS
   , OpenMode (ReadMode)
   , hClose
@@ -120,6 +123,7 @@ import System.FS.API
   , removeFile
   , withFile
   )
+import System.FS.API.Lazy (hGetExactlyAt)
 
 -- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
@@ -227,8 +231,6 @@ onDemandIteratorForRange ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
@@ -244,8 +246,6 @@ onDemandIteratorFrom ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
@@ -278,8 +278,6 @@ mkOnDemandIterator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
@@ -558,6 +556,75 @@ chunkForFrom ci from = maybe (ChunkNo 0) (ChunkLayout.chunkIndexOfSlot ci) $ slo
 chunkForTo :: ChunkInfo -> StreamTo blk -> ChunkNo
 chunkForTo ci (StreamToInclusive pt) = ChunkLayout.chunkIndexOfSlot ci (realPointSlot pt)
 
+-- | Faster drop-in for upstream 'extractBlockComponent' that skips the CRC32
+-- check on raw-block reads. Chunks served by the GSA have been CRC-verified
+-- at download time (see 'GenesisSyncAccelerator.RemoteStorage'); re-checking
+-- on every single-block read in the hot serving path is redundant.
+--
+-- Only supports the components the GSA actually uses on the serving path:
+-- 'GetHash', 'GetSlot', 'GetIsEBB', 'GetBlockSize', 'GetHeaderSize',
+-- 'GetRawBlock', 'GetRawHeader', 'GetNestedCtxt', plus 'GetPure' / 'GetApply'
+-- for composing via 'getSerialisedBlockWithPoint' / 'getSerialisedHeaderWithPoint'.
+-- Other cases ('GetBlock', 'GetHeader', 'GetVerifiedBlock') deliberately error;
+-- the GSA never requests them.
+extractBlockComponentNoCRC ::
+  forall m blk b h.
+  ( ReconstructNestedCtxt Header blk
+  , IOLike m
+  ) =>
+  HasFS m h ->
+  ChunkInfo ->
+  Handle h ->
+  WithBlockSize (Secondary.Entry blk) ->
+  BlockComponent blk b ->
+  m b
+extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) = go
+ where
+  Secondary.Entry
+    { Secondary.blockOffset
+    , Secondary.headerHash
+    , Secondary.headerSize
+    , Secondary.headerOffset
+    , Secondary.blockOrEBB
+    } = entry
+
+  slotNo :: SlotNo
+  slotNo = slotNoOfBlockOrEBB chunkInfo blockOrEBB
+
+  blockAbs :: AbsOffset
+  blockAbs = AbsOffset $ Secondary.unBlockOffset blockOffset
+
+  headerAbs :: AbsOffset
+  headerAbs =
+    AbsOffset $
+      Secondary.unBlockOffset blockOffset
+        + fromIntegral (Secondary.unHeaderOffset headerOffset)
+
+  go :: forall b'. BlockComponent blk b' -> m b'
+  go = \case
+    GetHash -> return headerHash
+    GetSlot -> return slotNo
+    GetIsEBB -> return $ isBlockOrEBB blockOrEBB
+    GetBlockSize -> return $ SizeInBytes blockSize
+    GetHeaderSize -> return $ fromIntegral $ Secondary.unHeaderSize headerSize
+    GetRawBlock -> hGetExactlyAt hasFS eHnd (fromIntegral blockSize) blockAbs
+    GetRawHeader ->
+      hGetExactlyAt hasFS eHnd (fromIntegral (Secondary.unHeaderSize headerSize)) headerAbs
+    GetNestedCtxt -> do
+      bytes <-
+        Short.toShort . LBS.toStrict
+          <$> hGetExactlyAt
+            hasFS
+            eHnd
+            (fromIntegral (getPrefixLen (reconstructPrefixLen (Proxy @(Header blk)))))
+            blockAbs
+      return $ reconstructNestedCtxt (Proxy @(Header blk)) bytes (SizeInBytes blockSize)
+    GetPure a -> return a
+    GetApply f bc -> go f <*> go bc
+    GetBlock -> error "GSA.extractBlockComponentNoCRC: GetBlock not supported"
+    GetHeader -> error "GSA.extractBlockComponentNoCRC: GetHeader not supported"
+    GetVerifiedBlock -> error "GSA.extractBlockComponentNoCRC: GetVerifiedBlock not supported"
+
 -- | Creates a "Raw Chunk Iterator" that serves blocks from a specific list of chunks.
 --
 -- This iterator is "stateless" in the sense that it does not rely on the global
@@ -568,8 +635,6 @@ mkRawBlockIterator ::
   ( IOLike m
   , MonadIO m
   , HasHeader blk
-  , DecodeDisk blk (LBS.ByteString -> blk)
-  , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
@@ -587,7 +652,7 @@ mkRawBlockIterator ::
   -- | The chunk from which to read blocks.
   ChunkNo ->
   m (Iterator m blk b)
-mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component applyFrom applyTo chunk = do
+mkRawBlockIterator hasFS chunkInfo _codecConfig _checkIntegrity component applyFrom applyTo chunk = do
   -- 1. Read all entries from the requested chunks.
   allEntries <- do
     chunkSize <- withFile hasFS (fsPathChunkFile chunk) ReadMode (hGetSize hasFS)
@@ -626,12 +691,9 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component applyFro
 
             res <-
               onException
-                ( extractBlockComponent
+                ( extractBlockComponentNoCRC
                     hasFS
                     chunkInfo
-                    chunk
-                    codecConfig
-                    checkIntegrity
                     handle
                     (WithBlockSize size entry)
                     component
