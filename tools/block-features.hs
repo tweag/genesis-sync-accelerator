@@ -16,15 +16,14 @@
 -- 'Cardano.Tools.DBAnalyser.Block.Shelley' instance.
 module Main (main) where
 
+import Cardano.Crypto.Init (cryptoInit)
 import qualified Cardano.Ledger.Alonzo.Scripts as Alonzo
-  ( AlonzoEraScript
-  , ExUnits (..)
+  ( ExUnits (..)
   , plutusScriptLanguage
   , toPlutusScript
   )
 import qualified Cardano.Ledger.Alonzo.Tx as Alonzo (totExUnits)
 import qualified Cardano.Ledger.Alonzo.TxWits as Alonzo (AlonzoEraTxWits)
-import qualified Cardano.Ledger.Plutus.Language as Plutus (Language (..))
 import qualified Cardano.Ledger.Babbage.TxBody as Babbage
   ( BabbageEraTxBody (referenceInputsTxBodyL)
   )
@@ -33,28 +32,27 @@ import qualified Cardano.Ledger.Babbage.TxOut as Babbage
   )
 import Cardano.Ledger.BaseTypes (StrictMaybe (..))
 import qualified Cardano.Ledger.Core as Core
-  ( EraBlockBody (fromTxSeq)
+  ( EraBlockBody (txSeqBlockBodyL)
   , EraTx (bodyTxL, witsTxL)
   , EraTxBody (inputsTxBodyL, outputsTxBodyL)
   , EraTxWits (scriptTxWitsL)
   )
+import qualified Cardano.Ledger.Plutus.Language as Plutus (Language (..))
 import qualified Cardano.Ledger.Shelley.API as SL (Block (Block))
-import qualified Data.Set as Set
-import Data.Foldable (toList)
-import Lens.Micro ((^.))
-import Cardano.Crypto.Init (cryptoInit)
 import qualified Cardano.Tools.DBAnalyser.Block.Cardano ()
 import qualified Cardano.Tools.DBAnalyser.HasAnalysis as HasAnalysis
 import Control.Monad (when)
 import Control.ResourceRegistry (runWithTempRegistry, withRegistry)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8 as BS8
-import Data.Foldable (foldl')
+import Data.Foldable (foldl', toList)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Proxy (Proxy (..))
+import qualified Data.Set as Set
 import Data.Word (Word16, Word64)
 import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
+import Lens.Micro ((^.))
 import Main.Utf8 (withStdTerminalHandles)
 import Options.Applicative
 import Ouroboros.Consensus.Block
@@ -71,7 +69,6 @@ import Ouroboros.Consensus.Cardano.Block
   ( pattern BlockAllegra
   , pattern BlockAlonzo
   , pattern BlockBabbage
-  , pattern BlockByron
   , pattern BlockConway
   , pattern BlockMary
   , pattern BlockShelley
@@ -254,21 +251,21 @@ hashToHex h = BS8.unpack (B16.encode (toRawHash (Proxy :: Proxy StandardBlock) h
 -- slope, so a Byron-baseline offset is irrelevant.
 blockNumInputs :: StandardBlock -> Int
 blockNumInputs = \case
-  BlockByron _ -> 0
   BlockShelley b -> sumNumInputs b
   BlockAllegra b -> sumNumInputs b
   BlockMary b -> sumNumInputs b
   BlockAlonzo b -> sumNumInputs b
   BlockBabbage b -> sumNumInputs b
   BlockConway b -> sumNumInputs b
+  _ -> 0
 
 sumNumInputs ::
   forall proto era.
-  (Core.EraTx era, Core.EraBlockBody era) =>
+  Core.EraBlockBody era =>
   Shelley.ShelleyBlock proto era ->
   Int
 sumNumInputs blk = case Shelley.shelleyBlockRaw blk of
-  SL.Block _ body -> foldl' addTx 0 (Core.fromTxSeq @era body)
+  SL.Block _ body -> foldl' addTx 0 (body ^. Core.txSeqBlockBodyL)
  where
   addTx !acc tx =
     acc + Set.size (tx ^. Core.bodyTxL ^. Core.inputsTxBodyL)
@@ -277,13 +274,10 @@ sumNumInputs blk = case Shelley.shelleyBlockRaw blk of
 -- block. Returns @(0, 0)@ for pre-Alonzo eras (no redeemers possible).
 blockExUnits :: StandardBlock -> (Word64, Word64)
 blockExUnits = \case
-  BlockByron _ -> (0, 0)
-  BlockShelley _ -> (0, 0)
-  BlockAllegra _ -> (0, 0)
-  BlockMary _ -> (0, 0)
   BlockAlonzo b -> sumExUnits b
   BlockBabbage b -> sumExUnits b
   BlockConway b -> sumExUnits b
+  _ -> (0, 0)
 
 -- | Sum (steps, mem) per Plutus language across all transactions in the
 -- block. Tagging strategy (witness-set only, no UTxO walk):
@@ -306,28 +300,21 @@ blockExUnits = \case
 blockPlutusLangExUnits ::
   StandardBlock -> (Word64, Word64, Word64, Word64, Word64, Word64)
 blockPlutusLangExUnits = \case
-  BlockByron _ -> z
-  BlockShelley _ -> z
-  BlockAllegra _ -> z
-  BlockMary _ -> z
   BlockAlonzo b -> sumPlutusLang Plutus.PlutusV1 b
   BlockBabbage b -> sumPlutusLang Plutus.PlutusV2 b
   BlockConway b -> sumPlutusLang Plutus.PlutusV3 b
- where
-  z = (0, 0, 0, 0, 0, 0)
+  _ -> (0, 0, 0, 0, 0, 0)
 
 sumPlutusLang ::
   forall proto era.
-  ( Core.EraTx era
-  , Core.EraBlockBody era
+  ( Core.EraBlockBody era
   , Alonzo.AlonzoEraTxWits era
-  , Alonzo.AlonzoEraScript era
   ) =>
   Plutus.Language ->
   Shelley.ShelleyBlock proto era ->
   (Word64, Word64, Word64, Word64, Word64, Word64)
 sumPlutusLang eraDefault blk = case Shelley.shelleyBlockRaw blk of
-  SL.Block _ body -> foldl' addTx (0, 0, 0, 0, 0, 0) (Core.fromTxSeq @era body)
+  SL.Block _ body -> foldl' addTx (0, 0, 0, 0, 0, 0) (body ^. Core.txSeqBlockBodyL)
  where
   addTx acc@(!v1s, !v1m, !v2s, !v2m, !v3s, !v3m) tx =
     case Alonzo.totExUnits tx of
@@ -358,15 +345,16 @@ sumPlutusLang eraDefault blk = case Shelley.shelleyBlockRaw blk of
                 Plutus.PlutusV1 -> (a1s + stepsPer, a1m + memPer, a2s, a2m, a3s, a3m)
                 Plutus.PlutusV2 -> (a1s, a1m, a2s + stepsPer, a2m + memPer, a3s, a3m)
                 Plutus.PlutusV3 -> (a1s, a1m, a2s, a2m, a3s + stepsPer, a3m + memPer)
+                _ -> (a1s, a1m, a2s, a2m, a3s, a3m)
          in foldl' addLang (v1s, v1m, v2s, v2m, v3s, v3m) (Set.toList chosenLangs)
 
 sumExUnits ::
   forall proto era.
-  (Core.EraTx era, Core.EraBlockBody era, Alonzo.AlonzoEraTxWits era) =>
+  (Core.EraBlockBody era, Alonzo.AlonzoEraTxWits era) =>
   Shelley.ShelleyBlock proto era ->
   (Word64, Word64)
 sumExUnits blk = case Shelley.shelleyBlockRaw blk of
-  SL.Block _ body -> foldl' addTx (0, 0) (Core.fromTxSeq @era body)
+  SL.Block _ body -> foldl' addTx (0, 0) (body ^. Core.txSeqBlockBodyL)
  where
   addTx (!steps, !mem) tx =
     case Alonzo.totExUnits tx of
@@ -383,30 +371,25 @@ sumExUnits blk = case Shelley.shelleyBlockRaw blk of
 -- Returns @(num_reference_inputs, num_reference_scripts, num_inline_datums)@.
 blockBabbageFeats :: StandardBlock -> (Int, Int, Int)
 blockBabbageFeats = \case
-  BlockByron _ -> (0, 0, 0)
-  BlockShelley _ -> (0, 0, 0)
-  BlockAllegra _ -> (0, 0, 0)
-  BlockMary _ -> (0, 0, 0)
-  BlockAlonzo _ -> (0, 0, 0)
   BlockBabbage b -> sumBabbageFeats b
   BlockConway b -> sumBabbageFeats b
+  _ -> (0, 0, 0)
 
 sumBabbageFeats ::
   forall proto era.
   ( Core.EraBlockBody era
   , Babbage.BabbageEraTxBody era
-  , Babbage.BabbageEraTxOut era
   ) =>
   Shelley.ShelleyBlock proto era ->
   (Int, Int, Int)
 sumBabbageFeats blk = case Shelley.shelleyBlockRaw blk of
-  SL.Block _ body -> foldl' addTx (0, 0, 0) (Core.fromTxSeq @era body)
+  SL.Block _ body -> foldl' addTx (0, 0, 0) (body ^. Core.txSeqBlockBodyL)
  where
-  addTx (!ri, !rs, !idm) tx =
+  addTx (!ri, !rs, !nDatums) tx =
     let txBody = tx ^. Core.bodyTxL
         nRefIn = Set.size (txBody ^. Babbage.referenceInputsTxBodyL)
         outs = toList (txBody ^. Core.outputsTxBodyL)
         countSJust f = length [() | o <- outs, SJust _ <- [o ^. f]]
         nRefScripts = countSJust Babbage.referenceScriptTxOutL
         nInlineDatums = countSJust Babbage.dataTxOutL
-     in (ri + nRefIn, rs + nRefScripts, idm + nInlineDatums)
+     in (ri + nRefIn, rs + nRefScripts, nDatums + nInlineDatums)
