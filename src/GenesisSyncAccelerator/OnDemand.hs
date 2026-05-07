@@ -79,17 +79,16 @@ import Ouroboros.Consensus.Storage.ImmutableDB.API
   ( Iterator (..)
   , IteratorResult (..)
   )
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout
   ( slotNoOfBlockOrEBB
   )
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Primary as Primary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary as Secondary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (WithBlockSize (..), isBlockOrEBB)
-import Ouroboros.Network.SizeInBytes (SizeInBytes (..))
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util
   ( fsPathChunkFile
   , fsPathPrimaryIndexFile
@@ -112,6 +111,7 @@ import Ouroboros.Consensus.Util.IOLike
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
+import Ouroboros.Network.SizeInBytes (SizeInBytes (..))
 import System.FS.API
   ( AbsOffset (..)
   , Handle
