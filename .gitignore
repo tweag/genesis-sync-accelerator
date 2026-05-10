@@ -80,6 +80,9 @@ ouroboros-consensus-cardano/test/tools-test/disk/chaindb/
 # Integration test runtime artifacts
 test/integration/config/peer-snapshot.json
 
+# bench harness output
+test/bench/results/
+
 # https://github.com/github/gitignore/blob/main/Haskell.gitignore
 dist
 dist-*
