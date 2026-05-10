@@ -132,6 +132,7 @@ executable gsa-bench
     ouroboros-network-protocols,
     stm,
     time,
+    typed-protocols,
     with-utf8,
 
 library

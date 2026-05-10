@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Plot GSA throughput matrix from sweep-matrix.csv.
+"""Plot GSA throughput matrix.
 
-Emits four PNGs into the output directory:
-  throughput-mbps.png           — MB/s vs batch size, one line per parallel
-  throughput-blocks.png         — blocks/s vs batch size, one line per parallel
-  throughput-heatmap-mbps.png   — MB/s heatmap (parallel × batch)
-  throughput-scaling.png        — MB/s vs parallel clients, one line per batch
+Auto-detects the sweep schema from the CSV header:
+
+* `batch,parallel,…` (sweep-matrix.csv) — multi-connection model. Emits:
+    throughput-mbps.png           MB/s vs batch, one line per parallel
+    throughput-blocks.png         blocks/s vs batch, one line per parallel
+    throughput-heatmap-mbps.png   parallel × batch heatmap
+    throughput-scaling.png        MB/s vs parallel, one line per batch
+
+* `batch,max_in_flight,…` (sweep-pipeline.csv) — single-connection
+  pipelined model (cardano-node-shaped). Emits:
+    throughput-pipeline-mbps.png         MB/s vs batch, one line per K
+    throughput-pipeline-blocks.png       blocks/s vs batch, one line per K
+    throughput-pipeline-heatmap-mbps.png K × batch heatmap
 
 Usage:
   python3 plot.py [csv-path] [out-dir]
@@ -26,15 +34,36 @@ CSV = Path(sys.argv[1] if len(sys.argv) > 1 else "sweep-matrix.csv")
 OUT = Path(sys.argv[2] if len(sys.argv) > 2 else ".")
 OUT.mkdir(parents=True, exist_ok=True)
 
-rows = []
 with CSV.open() as f:
-    for r in csv.DictReader(f):
+    reader = csv.DictReader(f)
+    fieldnames = reader.fieldnames or []
+    if "max_in_flight" in fieldnames:
+        SCHEMA = "pipeline"
+        Y_KEY = "max_in_flight"
+        Y_LABEL = "Max in-flight (K)"
+        Y_LEGEND = "K"
+        OUT_PREFIX = "throughput-pipeline"
+        TITLE_SUFFIX = "single connection, pipelined, Byron warm"
+    elif "parallel" in fieldnames:
+        SCHEMA = "parallel"
+        Y_KEY = "parallel"
+        Y_LABEL = "Parallel clients"
+        Y_LEGEND = "parallel"
+        OUT_PREFIX = "throughput"
+        TITLE_SUFFIX = "Byron blocks, warm cache"
+    else:
+        raise SystemExit(
+            f"unrecognised CSV schema in {CSV}: expected `parallel` or `max_in_flight` column"
+        )
+
+    rows = []
+    for r in reader:
         if not r.get("blocks_per_sec"):
             continue
         rows.append(
             {
                 "batch": int(r["batch"]),
-                "parallel": int(r["parallel"]),
+                "y": int(r[Y_KEY]),
                 "bps": float(r["blocks_per_sec"]),
                 "mbps": float(r["mb_per_sec"]),
                 "bpb": float(r["bytes_per_block"]) if r.get("bytes_per_block") else 0.0,
@@ -42,14 +71,14 @@ with CSV.open() as f:
         )
 
 batches = sorted({r["batch"] for r in rows})
-parallels = sorted({r["parallel"] for r in rows})
-print(f"batches={batches}  parallels={parallels}  rows={len(rows)}")
+ys = sorted({r["y"] for r in rows})
+print(f"schema={SCHEMA}  batches={batches}  {Y_KEY}s={ys}  rows={len(rows)}")
 
 
 def grid(key):
-    m = np.zeros((len(parallels), len(batches)))
+    m = np.zeros((len(ys), len(batches)))
     for r in rows:
-        i = parallels.index(r["parallel"])
+        i = ys.index(r["y"])
         j = batches.index(r["batch"])
         m[i, j] = r[key]
     return m
@@ -58,44 +87,44 @@ def grid(key):
 mbps = grid("mbps")
 bps = grid("bps")
 
-# MB/s vs batch, one line per parallel
+# MB/s vs batch, one line per Y
 plt.figure(figsize=(10, 6))
-for i, p in enumerate(parallels):
-    plt.plot(batches, mbps[i], marker="o", label=f"parallel={p}")
+for i, y in enumerate(ys):
+    plt.plot(batches, mbps[i], marker="o", label=f"{Y_LEGEND}={y}")
 plt.xscale("log")
 plt.xticks(batches, [str(b) for b in batches])
 plt.xlabel("Batch size (points per MsgRequestRange)")
 plt.ylabel("MB / s")
-plt.title("GSA throughput (MB/s) — Byron blocks, warm cache")
+plt.title(f"GSA throughput (MB/s) — {TITLE_SUFFIX}")
 plt.grid(True, alpha=0.4)
 plt.legend()
 plt.tight_layout()
-plt.savefig(OUT / "throughput-mbps.png", dpi=120)
+plt.savefig(OUT / f"{OUT_PREFIX}-mbps.png", dpi=120)
 plt.close()
 
 # blocks/s vs batch
 plt.figure(figsize=(10, 6))
-for i, p in enumerate(parallels):
-    plt.plot(batches, bps[i], marker="o", label=f"parallel={p}")
+for i, y in enumerate(ys):
+    plt.plot(batches, bps[i], marker="o", label=f"{Y_LEGEND}={y}")
 plt.xscale("log")
 plt.xticks(batches, [str(b) for b in batches])
 plt.xlabel("Batch size")
 plt.ylabel("blocks / s")
-plt.title("GSA throughput (blocks/s)")
+plt.title(f"GSA throughput (blocks/s) — {TITLE_SUFFIX}")
 plt.grid(True, alpha=0.4)
 plt.legend()
 plt.tight_layout()
-plt.savefig(OUT / "throughput-blocks.png", dpi=120)
+plt.savefig(OUT / f"{OUT_PREFIX}-blocks.png", dpi=120)
 plt.close()
 
 # MB/s heatmap
 fig, ax = plt.subplots(figsize=(9, 5))
 im = ax.imshow(mbps, aspect="auto", cmap="viridis")
 ax.set_xticks(range(len(batches)), [str(b) for b in batches])
-ax.set_yticks(range(len(parallels)), [str(p) for p in parallels])
+ax.set_yticks(range(len(ys)), [str(y) for y in ys])
 ax.set_xlabel("Batch size")
-ax.set_ylabel("Parallel clients")
-ax.set_title("GSA throughput heatmap (MB/s)")
+ax.set_ylabel(Y_LABEL)
+ax.set_title(f"GSA throughput heatmap (MB/s) — {TITLE_SUFFIX}")
 peak = mbps.max() if mbps.size else 1.0
 for i in range(mbps.shape[0]):
     for j in range(mbps.shape[1]):
@@ -110,20 +139,21 @@ for i in range(mbps.shape[0]):
         )
 plt.colorbar(im, label="MB/s")
 plt.tight_layout()
-plt.savefig(OUT / "throughput-heatmap-mbps.png", dpi=120)
+plt.savefig(OUT / f"{OUT_PREFIX}-heatmap-mbps.png", dpi=120)
 plt.close()
 
-# MB/s vs parallel, one line per batch
-plt.figure(figsize=(10, 6))
-for j, b in enumerate(batches):
-    plt.plot(parallels, mbps[:, j], marker="s", label=f"batch={b}")
-plt.xlabel("Parallel clients")
-plt.ylabel("MB / s")
-plt.title("GSA throughput scaling with clients")
-plt.grid(True, alpha=0.4)
-plt.legend()
-plt.tight_layout()
-plt.savefig(OUT / "throughput-scaling.png", dpi=120)
-plt.close()
+if SCHEMA == "parallel":
+    # MB/s vs parallel, one line per batch — only meaningful for the parallel sweep
+    plt.figure(figsize=(10, 6))
+    for j, b in enumerate(batches):
+        plt.plot(ys, mbps[:, j], marker="s", label=f"batch={b}")
+    plt.xlabel(Y_LABEL)
+    plt.ylabel("MB / s")
+    plt.title("GSA throughput scaling with clients")
+    plt.grid(True, alpha=0.4)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(OUT / "throughput-scaling.png", dpi=120)
+    plt.close()
 
-print(f"plots → {OUT}/throughput-*.png")
+print(f"plots → {OUT}/{OUT_PREFIX}-*.png")

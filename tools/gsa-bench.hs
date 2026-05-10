@@ -3,6 +3,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE NumericUnderscores #-}
@@ -76,7 +77,7 @@ import Ouroboros.Network.Block
   , Tip (..)
   , getTipPoint
   )
-import Ouroboros.Network.Driver.Simple (runPeer)
+import Ouroboros.Network.Driver.Simple (runPeer, runPipelinedPeer)
 import qualified Ouroboros.Network.IOManager as IOManager
 import Ouroboros.Network.Magic (NetworkMagic)
 import Ouroboros.Network.Mux
@@ -94,14 +95,13 @@ import Ouroboros.Network.PeerSelection.PeerSharing.Codec
   ( decodeRemoteAddress
   , encodeRemoteAddress
   )
-import Ouroboros.Network.Protocol.BlockFetch.Client
-  ( BlockFetchClient (..)
-  , BlockFetchReceiver (..)
-  , BlockFetchRequest (..)
-  , BlockFetchResponse (..)
-  , blockFetchClientPeer
+import Ouroboros.Network.Protocol.BlockFetch.Type
+  ( BlockFetch (..)
+  , ChainRange (..)
+  , Message (..)
   )
-import Ouroboros.Network.Protocol.BlockFetch.Type (ChainRange (..))
+import Network.TypedProtocol.Core
+import Network.TypedProtocol.Peer.Client
 import Ouroboros.Network.Protocol.ChainSync.Client
   ( ChainSyncClient (..)
   , ClientStIdle (..)
@@ -126,6 +126,7 @@ data Opts = Opts
   , oPort :: PortNumber
   , oNodeConfig :: FilePath
   , oParallel :: Int
+  , oMaxInFlight :: Int
   , oMaxBlocks :: Maybe Word64
   , oDuration :: Maybe Double
   , oReportInterval :: Double
@@ -162,9 +163,16 @@ optsParser =
     oParallel <-
       option auto $
         long "parallel"
-          <> help "Number of concurrent fake-node connections (default 1)"
+          <> help "Number of concurrent fake-node connections (default 1). Each connection opens a separate TCP stream — models the multi-peer case, not single-peer pipelining (use --max-in-flight for that)."
           <> metavar "N"
           <> value 1
+          <> showDefault
+    oMaxInFlight <-
+      option auto $
+        long "max-in-flight"
+          <> help "Maximum outstanding BlockFetch MsgRequestRange per connection (default 10, cap 100). This is the cardano-node-shaped concurrency knob: multiple ranges pipelined on a single TCP connection. Set to 1 for non-pipelined behaviour."
+          <> metavar "K"
+          <> value 10
           <> showDefault
     oMaxBlocks <-
       optional $
@@ -247,10 +255,12 @@ data ClientState = ClientState
   -- signal to drain any final partial batch and then send 'MsgClientDone'.
   }
 
-newClientState :: ClientCounter -> TVar Bool -> Int -> IO ClientState
-newClientState counter stop batchSize = do
+newClientState :: ClientCounter -> TVar Bool -> Int -> Int -> IO ClientState
+newClientState counter stop batchSize maxInFlight = do
   tip <- newTVarIO GenesisPoint
-  let cap = fromIntegral (max 2048 (4 * batchSize))
+  -- Capacity must hold at least K outstanding batches + a few for headroom,
+  -- otherwise ChainSync can't keep BlockFetch's pipeline full.
+  let cap = fromIntegral (max 2048 ((maxInFlight + 4) * batchSize))
   q <- newTBQueueIO cap
   reachedTip <- newTVarIO False
   pure
@@ -322,46 +332,129 @@ chainSyncBenchClient st =
       -- that case doesn't occur when benching against an ImmutableDB.
       }
 
--- ----- BlockFetch client: batched range requests -----------------------------
+-- ----- BlockFetch client: pipelined batched range requests -----------------
 --
--- Drain up to @batchSize@ 'Point's from 'csHeaderQ', form a
--- @ChainRange (firstPoint, lastPoint)@ covering them, and issue a single
--- 'MsgRequestRange'. The server responds with 'MsgStartBatch' followed by one
--- 'MsgBlock' per point then 'MsgBatchDone'. We count bytes per received block.
--- One round-trip per batch amortises RTT overhead across @batchSize@ blocks.
+-- Mirror cardano-node's BlockFetch.Client behaviour: keep up to @K@
+-- 'MsgRequestRange' requests outstanding on a single connection, pipelining
+-- new requests before the previous batch's 'MsgBatchDone' lands. Each request
+-- carries a @ChainRange@ covering up to @batchSize@ Points drained from
+-- 'csHeaderQ'. Bytes are counted per received 'MsgBlock'.
+--
+-- This uses the lower-level typed-protocols 'Client' API (rather than the
+-- higher-level 'BlockFetchSender' API) because step-by-step decisions need
+-- to query the STM-backed header queue and stop flag — which 'BlockFetchSender'
+-- can't express but 'Client'+'Effect' can.
 
-blockFetchBenchClient :: Int -> ClientState -> BlockFetchClient (Serialised Blk) (Point Blk) IO ()
-blockFetchBenchClient batchSize st = BlockFetchClient nextRequest
+blockFetchPipelinedBenchClient ::
+  -- | batchSize
+  Int ->
+  -- | maxInFlight (K)
+  Int ->
+  ClientState ->
+  ClientPipelined (BlockFetch (Serialised Blk) (Point Blk)) BFIdle IO ()
+blockFetchPipelinedBenchClient batchSize maxInFlight st =
+  ClientPipelined (sender Zero 0)
  where
-  nextRequest :: IO (BlockFetchRequest (Serialised Blk) (Point Blk) IO ())
-  nextRequest = do
-    decision <- atomically $ do
-      stopped <- readTVar (csStop st)
-      reachedTip <- readTVar (csReachedTip st)
-      qLen <- lengthTBQueue (csHeaderQ st)
-      let qLenI = fromIntegral qLen :: Int
-      if stopped
-        then pure Stop
-        else
-          if qLenI >= batchSize
-            then Fetch <$> drainN batchSize
-            else
-              if reachedTip
-                then
-                  if qLenI > 0
-                    then Fetch <$> drainN qLenI
-                    else pure Stop
-                else retry
-    case decision of
-      Stop -> pure (SendMsgClientDone ())
-      Fetch [] -> pure (SendMsgClientDone ()) -- unreachable: drainN only called when qLenI > 0
-      Fetch pts@(from_ : _) -> do
-        let to_ = lastOf pts from_
-        pure $
-          SendMsgRequestRange
-            (ChainRange from_ to_)
-            response
-            (BlockFetchClient nextRequest)
+  -- The 'Nat n' singleton tracks outstanding requests at the type level so
+  -- we may legally 'Collect' (only allowed when n ≥ 1) and 'Done' (only
+  -- allowed when n = 0). The 'Int' shadow is just so we can compare against
+  -- 'maxInFlight' without an O(n) singleton-to-Int conversion every step.
+  sender ::
+    forall n.
+    Nat n ->
+    Int ->
+    Client
+      (BlockFetch (Serialised Blk) (Point Blk))
+      ('Pipelined n ())
+      'BFIdle
+      IO
+      ()
+  sender outstanding inFlight = Effect $ do
+    decision <- atomically (decide inFlight)
+    pure (apply outstanding inFlight decision)
+
+  decide :: Int -> STM StepAction
+  decide inFlight = do
+    stopped <- readTVar (csStop st)
+    qLen <- lengthTBQueue (csHeaderQ st)
+    reachedTip <- readTVar (csReachedTip st)
+    let qLenI = fromIntegral qLen :: Int
+        canSend = inFlight < maxInFlight
+        haveOutstanding = inFlight > 0
+    if stopped
+      then
+        if haveOutstanding
+          then pure StepCollect -- drain the pipeline before terminating
+          else pure StepDone
+      else
+        if canSend && qLenI >= batchSize
+          then StepSend <$> drainN batchSize
+          else
+            if canSend && reachedTip && qLenI > 0
+              then StepSend <$> drainN qLenI
+              else
+                if haveOutstanding
+                  then pure StepCollect
+                  else
+                    if reachedTip
+                      then pure StepDone -- nothing in flight, nothing to send, server idle
+                      else retry -- block waiting for ChainSync to deliver more headers
+
+  apply ::
+    forall n.
+    Nat n ->
+    Int ->
+    StepAction ->
+    Client
+      (BlockFetch (Serialised Blk) (Point Blk))
+      ('Pipelined n ())
+      'BFIdle
+      IO
+      ()
+  apply outstanding _inFlight StepDone =
+    case outstanding of
+      Zero -> Yield MsgClientDone (Done ())
+      Succ _ -> error "gsa-bench: StepDone with outstanding > 0 should be impossible"
+  apply outstanding inFlight (StepSend pts) =
+    YieldPipelined
+      (MsgRequestRange (ChainRange (head pts) (lastOf pts (head pts))))
+      (receiver pts)
+      (sender (Succ outstanding) (inFlight + 1))
+  apply outstanding inFlight StepCollect =
+    case outstanding of
+      Zero ->
+        error "gsa-bench: StepCollect with no outstanding requests should be impossible"
+      Succ n ->
+        Collect
+          Nothing
+          (\() -> sender n (inFlight - 1))
+
+  receiver ::
+    [Point Blk] ->
+    Receiver
+      (BlockFetch (Serialised Blk) (Point Blk))
+      'BFBusy
+      'BFIdle
+      IO
+      ()
+  receiver _pts =
+    ReceiverAwait $ \case
+      MsgStartBatch -> receiveBlocks
+      MsgNoBlocks -> ReceiverDone ()
+   where
+    receiveBlocks ::
+      Receiver
+        (BlockFetch (Serialised Blk) (Point Blk))
+        'BFStreaming
+        'BFIdle
+        IO
+        ()
+    receiveBlocks =
+      ReceiverAwait $ \case
+        MsgBlock (Serialised bs) -> ReceiverEffect $ do
+          atomically $ addBlock (csCounter st) (fromIntegral (BL.length bs))
+          pure receiveBlocks
+        MsgBatchDone -> ReceiverDone ()
 
   -- Total replacement for @last@ — non-partial, requires a default.
   lastOf :: [a] -> a -> a
@@ -372,23 +465,7 @@ blockFetchBenchClient batchSize st = BlockFetchClient nextRequest
   drainN :: Int -> STM [Point Blk]
   drainN n = replicateM n (readTBQueue (csHeaderQ st))
 
-  response :: BlockFetchResponse (Serialised Blk) IO ()
-  response =
-    BlockFetchResponse
-      { handleStartBatch = pure receiver
-      , handleNoBlocks = pure ()
-      }
-
-  receiver :: BlockFetchReceiver (Serialised Blk) IO
-  receiver =
-    BlockFetchReceiver
-      { handleBlock = \(Serialised bs) -> do
-          atomically $ addBlock (csCounter st) (fromIntegral (BL.length bs))
-          pure receiver
-      , handleBatchDone = pure ()
-      }
-
-data FetchDecision = Stop | Fetch ![Point Blk]
+data StepAction = StepDone | StepSend ![Point Blk] | StepCollect
 
 -- ----- KeepAlive / TxSubmission stubs ----------------------------------------
 
@@ -410,7 +487,9 @@ noopKeepAliveClient = KeepAliveClient (atomically retry)
 -- blockFetch/txSubmission), using the same numbers, limits, and serialised
 -- codecs.
 benchApplication ::
-  -- | batchSize (passed through to blockFetchBenchClient)
+  -- | batchSize (passed through to blockFetchPipelinedBenchClient)
+  Int ->
+  -- | maxInFlight (pipeline depth on the BlockFetch protocol)
   Int ->
   TopLevelConfig Blk ->
   ClientState ->
@@ -425,7 +504,7 @@ benchApplication ::
         ()
         Void
     )
-benchApplication batchSize cfg st =
+benchApplication batchSize maxInFlight cfg st =
   Versions $ Map.mapWithKey mkVersion (supportedNodeToNodeVersions (Proxy @Blk))
  where
   networkMagic :: NetworkMagic
@@ -462,11 +541,11 @@ benchApplication batchSize cfg st =
               (chainSyncClientPeer (chainSyncBenchClient st))
       , mkMP Mux.StartEagerly N2N.blockFetchMiniProtocolNum blockFetchLims $
           MiniProtocolCb $ \_ctx channel ->
-            runPeer
+            runPipelinedPeer
               nullTracer
               cBlockFetchCodecSerialised
               channel
-              (blockFetchClientPeer (blockFetchBenchClient batchSize st))
+              (blockFetchPipelinedBenchClient batchSize maxInFlight st)
       , mkMP Mux.StartOnDemand N2N.txSubmissionMiniProtocolNum txSubmissionLims $
           MiniProtocolCb (\_ _ -> atomically retry)
       ]
@@ -502,17 +581,19 @@ benchApplication batchSize cfg st =
 runBenchClient ::
   -- | batchSize
   Int ->
+  -- | maxInFlight
+  Int ->
   Snocket.Snocket IO Socket.Socket Socket.SockAddr ->
   TopLevelConfig Blk ->
   Socket.SockAddr ->
   ClientState ->
   IO ()
-runBenchClient batchSize sn cfg addr st = do
+runBenchClient batchSize maxInFlight sn cfg addr st = do
   result <-
     N2N.connectTo
       sn
       N2N.nullNetworkConnectTracers
-      (benchApplication batchSize cfg st)
+      (benchApplication batchSize maxInFlight cfg st)
       Nothing
       addr
   case result of
@@ -669,6 +750,9 @@ main = withStdTerminalHandles $ do
   when (oParallel opts < 1) $ do
     hPutStrLn stderr "--parallel must be >= 1"
     exitFailure
+  when (oMaxInFlight opts < 1 || oMaxInFlight opts > 100) $ do
+    hPutStrLn stderr "--max-in-flight must be in [1, 100] (cap matches blockFetchPipeliningMax)"
+    exitFailure
   cfg <- getTopLevelConfig (oNodeConfig opts)
   addr <- resolveAddr (oHost opts) (oPort opts)
   hPutStrLn stderr $
@@ -678,6 +762,10 @@ main = withStdTerminalHandles $ do
       <> show (oPort opts)
       <> " parallel="
       <> show (oParallel opts)
+      <> " max-in-flight="
+      <> show (oMaxInFlight opts)
+      <> " batch-size="
+      <> show (oBatchSize opts)
 
   IOManager.withIOManager $ \iocp -> do
     let sn = Snocket.socketSnocket iocp
@@ -687,7 +775,10 @@ main = withStdTerminalHandles $ do
       sequence
         [ newClientCounter | _ <- [1 .. oParallel opts]
         ]
-    states <- traverse (\c -> newClientState c stop (oBatchSize opts)) counters
+    states <-
+      traverse
+        (\c -> newClientState c stop (oBatchSize opts) (oMaxInFlight opts))
+        counters
 
     start <- getCurrentTime
 
@@ -706,7 +797,9 @@ main = withStdTerminalHandles $ do
     link watchdogThread
 
     clientThreads :: [Async ()] <-
-      traverse (async . runBenchClient (oBatchSize opts) sn cfg addr) states
+      traverse
+        (async . runBenchClient (oBatchSize opts) (oMaxInFlight opts) sn cfg addr)
+        states
     for_ clientThreads link
 
     mapM_ wait clientThreads
