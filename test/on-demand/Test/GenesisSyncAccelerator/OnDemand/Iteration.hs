@@ -1285,7 +1285,7 @@ tests =
         "dropUntilLowerBound picks the EBB at a slot shared with a main block"
         unit_dropUntilLowerBound_picksEBBAtSharedSlot
     , testCase
-        "dropUntilLowerBound reports the same-slot near-miss on chunk exhaustion"
+        "dropUntilLowerBound reports the same-slot near-miss on exhaustion"
         unit_dropUntilLowerBound_reportsNearMissOnExhaustion
     , testCase
         "dropUntilLowerBound reports the next-slot near-miss on overshoot"
@@ -1297,7 +1297,7 @@ tests =
         "truncateAtUpperBound picks the main block at a slot shared with an EBB"
         unit_truncateAtUpperBound_picksMainBlockAtSharedSlot
     , testCase
-        "truncateAtUpperBound reports the same-slot near-miss on chunk exhaustion"
+        "truncateAtUpperBound reports the same-slot near-miss on exhaustion"
         unit_truncateAtUpperBound_reportsNearMissOnExhaustion
     , testCase
         "truncateAtUpperBound reports the previous-slot near-miss on overshoot"
