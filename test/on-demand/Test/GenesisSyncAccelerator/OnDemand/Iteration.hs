@@ -1129,7 +1129,8 @@ mkEntry boe hash =
       , blockOrEBB = boe
       }
 
-ebbHash, mainHash, slot1Hash :: TestHash
+bogusQueryHash, ebbHash, mainHash, slot1Hash :: TestHash
+bogusQueryHash = makeTestHash 99
 ebbHash = makeTestHash 1
 mainHash = makeTestHash 2
 slot1Hash = makeTestHash 3
@@ -1156,24 +1157,22 @@ unit_dropUntilLowerBound_picksEBBAtSharedSlot =
 
 unit_dropUntilLowerBound_reportsNearMissOnExhaustion :: IO ()
 unit_dropUntilLowerBound_reportsNearMissOnExhaustion =
-  let bogus = makeTestHash 99
-      onlySharedSlot = take 2 sharedSlotEntries
-   in case dropUntilLowerBound sharedSlotChunkInfo (SlotNo 0) bogus onlySharedSlot of
+  let onlySharedSlot = take 2 sharedSlotEntries
+   in case dropUntilLowerBound sharedSlotChunkInfo (SlotNo 0) bogusQueryHash onlySharedSlot of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
           s @?= SlotNo 0
-          h @?= bogus
+          h @?= bogusQueryHash
           assertBool "near-miss must be a slot-0 entry" $
             headerHash near `elem` [ebbHash, mainHash]
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
 
 unit_dropUntilLowerBound_reportsNearMissOnOvershoot :: IO ()
 unit_dropUntilLowerBound_reportsNearMissOnOvershoot =
-  let queryHash = makeTestHash 99
-      querySlot = SlotNo 0
-   in case dropUntilLowerBound sharedSlotChunkInfo querySlot queryHash sharedSlotEntries of
+  let querySlot = SlotNo 0
+   in case dropUntilLowerBound sharedSlotChunkInfo querySlot bogusQueryHash sharedSlotEntries of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
           s @?= querySlot
-          h @?= queryHash
+          h @?= bogusQueryHash
           headerHash near @?= slot1Hash
           getEntrySlot sharedSlotChunkInfo near @?= SlotNo 1
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
@@ -1192,24 +1191,22 @@ unit_truncateAtUpperBound_picksMainBlockAtSharedSlot =
 
 unit_truncateAtUpperBound_reportsNearMissOnExhaustion :: IO ()
 unit_truncateAtUpperBound_reportsNearMissOnExhaustion =
-  let bogus = makeTestHash 99
-      onlySharedSlot = take 2 sharedSlotEntries
-   in case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) bogus onlySharedSlot of
+  let onlySharedSlot = take 2 sharedSlotEntries
+   in case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) bogusQueryHash onlySharedSlot of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
           s @?= SlotNo 0
-          h @?= bogus
+          h @?= bogusQueryHash
           assertBool "near-miss must be a slot-0 entry" $
             headerHash near `elem` [ebbHash, mainHash]
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
 
 unit_truncateAtUpperBound_reportsNearMissOnOvershoot :: IO ()
 unit_truncateAtUpperBound_reportsNearMissOnOvershoot =
-  let queryHash = makeTestHash 99
-      querySlot = SlotNo 0
-   in case truncateAtUpperBound sharedSlotChunkInfo querySlot queryHash sharedSlotEntries of
+  let querySlot = SlotNo 0
+   in case truncateAtUpperBound sharedSlotChunkInfo querySlot bogusQueryHash sharedSlotEntries of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
           s @?= querySlot
-          h @?= queryHash
+          h @?= bogusQueryHash
           headerHash near @?= slot1Hash
           getEntrySlot sharedSlotChunkInfo near @?= SlotNo 1
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
