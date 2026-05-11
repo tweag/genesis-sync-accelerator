@@ -34,7 +34,7 @@ import GenesisSyncAccelerator.OnDemand
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
-import GenesisSyncAccelerator.Util (fpToHasFS)
+import GenesisSyncAccelerator.Util (fpToHasFS, getEntrySlot)
 import Ouroboros.Consensus.Block (StandardHash)
 import Ouroboros.Consensus.Block.Abstract
   ( ConvertRawHash
@@ -1162,6 +1162,18 @@ unit_dropUntilLowerBound_reportsNearMissOnExhaustion =
             headerHash near `elem` [ebbHash, mainHash]
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
 
+unit_dropUntilLowerBound_reportsNearMissOnOvershoot :: IO ()
+unit_dropUntilLowerBound_reportsNearMissOnOvershoot =
+  let queryHash = testHashFromList [99]
+      querySlot = SlotNo 0
+   in case dropUntilLowerBound sharedSlotChunkInfo querySlot queryHash sharedSlotEntries of
+        Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
+          s @?= querySlot
+          h @?= queryHash
+          headerHash near @?= slot1Hash
+          getEntrySlot sharedSlotChunkInfo near @?= SlotNo 1
+        other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
+
 unit_truncateAtUpperBound_picksEBBAtSharedSlot :: IO ()
 unit_truncateAtUpperBound_picksEBBAtSharedSlot =
   case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) ebbHash sharedSlotEntries of
@@ -1184,6 +1196,18 @@ unit_truncateAtUpperBound_reportsNearMissOnExhaustion =
           h @?= bogus
           assertBool "near-miss must be a slot-0 entry" $
             headerHash near `elem` [ebbHash, mainHash]
+        other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
+
+unit_truncateAtUpperBound_reportsNearMissOnOvershoot :: IO ()
+unit_truncateAtUpperBound_reportsNearMissOnOvershoot =
+  let queryHash = testHashFromList [99]
+      querySlot = SlotNo 0
+   in case truncateAtUpperBound sharedSlotChunkInfo querySlot queryHash sharedSlotEntries of
+        Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
+          s @?= querySlot
+          h @?= queryHash
+          headerHash near @?= slot1Hash
+          getEntrySlot sharedSlotChunkInfo near @?= SlotNo 1
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
 
 sizedEntry :: SizedEntry blk -> Entry blk
@@ -1261,6 +1285,9 @@ tests =
         "dropUntilLowerBound reports the same-slot near-miss on chunk exhaustion"
         unit_dropUntilLowerBound_reportsNearMissOnExhaustion
     , testCase
+        "dropUntilLowerBound reports the next-slot near-miss on overshoot"
+        unit_dropUntilLowerBound_reportsNearMissOnOvershoot
+    , testCase
         "truncateAtUpperBound picks the EBB at a slot shared with a main block"
         unit_truncateAtUpperBound_picksEBBAtSharedSlot
     , testCase
@@ -1269,4 +1296,7 @@ tests =
     , testCase
         "truncateAtUpperBound reports the same-slot near-miss on chunk exhaustion"
         unit_truncateAtUpperBound_reportsNearMissOnExhaustion
+    , testCase
+        "truncateAtUpperBound reports the previous-slot near-miss on overshoot"
+        unit_truncateAtUpperBound_reportsNearMissOnOvershoot
     ]
