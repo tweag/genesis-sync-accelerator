@@ -911,7 +911,7 @@ instance Arbitrary SlotNo where
   arbitrary = SlotNo <$> arbitrary
 
 instance Arbitrary TestHash where
-  arbitrary = testHashFromList . (: []) <$> arbitrary
+  arbitrary = makeTestHash <$> arbitrary
 
 instance Arbitrary Validity where
   arbitrary = (\p -> if p then Valid else Invalid) <$> arbitrary
@@ -1008,7 +1008,7 @@ genSlotForChunk :: ChunkInfo -> ChunkNo -> Gen SlotNo
 genSlotForChunk (UniformChunkSize ChunkSize{numRegularBlocks = s}) (ChunkNo n) = let lo = n * s in SlotNo <$> choose (lo, lo + s - 1)
 
 genUniqueHashes :: Int -> Gen [TestHash]
-genUniqueHashes n = map (\h -> testHashFromList [fromIntegral h]) <$> shuffle [1 .. n]
+genUniqueHashes n = map makeTestHash <$> shuffle [1 .. n]
 
 getMinChunk :: ChunkInfo -> [TestBlock] -> ChunkNo
 getMinChunk ci = minimum . map (blockChunk ci)
@@ -1038,6 +1038,10 @@ makeRuntimeWithNullRemoteAndNullLogging (TmpDir tmp) chunkInfo chunkedBlocks =
       , odcMaxCachedChunks = MaxCachedChunksCount . fromIntegral $ Map.size chunkedBlocks
       , odcPrefetchAhead = PrefetchChunksCount 0
       }
+
+-- The argument could be any Integral, but force Int for efficiency and to avoid type-defaults
+makeTestHash :: Int -> TestHash
+makeTestHash n = testHashFromList [fromIntegral n]
 
 modifyBlockHash :: TestBlock -> TestHash -> TestBlock
 modifyBlockHash b h = unsafeTestBlock (tbSlot b) h (tbValid b)
@@ -1126,9 +1130,9 @@ mkEntry boe hash =
       }
 
 ebbHash, mainHash, slot1Hash :: TestHash
-ebbHash = testHashFromList [1]
-mainHash = testHashFromList [2]
-slot1Hash = testHashFromList [3]
+ebbHash = makeTestHash 1
+mainHash = makeTestHash 2
+slot1Hash = makeTestHash 3
 
 -- EBB and main block both at slot 0, plus a main block at slot 1.
 sharedSlotEntries :: [SizedEntry TestBlock]
@@ -1152,7 +1156,7 @@ unit_dropUntilLowerBound_picksEBBAtSharedSlot =
 
 unit_dropUntilLowerBound_reportsNearMissOnExhaustion :: IO ()
 unit_dropUntilLowerBound_reportsNearMissOnExhaustion =
-  let bogus = testHashFromList [99]
+  let bogus = makeTestHash 99
       onlySharedSlot = take 2 sharedSlotEntries
    in case dropUntilLowerBound sharedSlotChunkInfo (SlotNo 0) bogus onlySharedSlot of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
@@ -1164,7 +1168,7 @@ unit_dropUntilLowerBound_reportsNearMissOnExhaustion =
 
 unit_dropUntilLowerBound_reportsNearMissOnOvershoot :: IO ()
 unit_dropUntilLowerBound_reportsNearMissOnOvershoot =
-  let queryHash = testHashFromList [99]
+  let queryHash = makeTestHash 99
       querySlot = SlotNo 0
    in case dropUntilLowerBound sharedSlotChunkInfo querySlot queryHash sharedSlotEntries of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
@@ -1188,7 +1192,7 @@ unit_truncateAtUpperBound_picksMainBlockAtSharedSlot =
 
 unit_truncateAtUpperBound_reportsNearMissOnExhaustion :: IO ()
 unit_truncateAtUpperBound_reportsNearMissOnExhaustion =
-  let bogus = testHashFromList [99]
+  let bogus = makeTestHash 99
       onlySharedSlot = take 2 sharedSlotEntries
    in case truncateAtUpperBound sharedSlotChunkInfo (SlotNo 0) bogus onlySharedSlot of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
@@ -1200,7 +1204,7 @@ unit_truncateAtUpperBound_reportsNearMissOnExhaustion =
 
 unit_truncateAtUpperBound_reportsNearMissOnOvershoot :: IO ()
 unit_truncateAtUpperBound_reportsNearMissOnOvershoot =
-  let queryHash = testHashFromList [99]
+  let queryHash = makeTestHash 99
       querySlot = SlotNo 0
    in case truncateAtUpperBound sharedSlotChunkInfo querySlot queryHash sharedSlotEntries of
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
