@@ -1301,6 +1301,6 @@ tests =
         "truncateAtUpperBound reports the same-slot near-miss on exhaustion"
         unit_truncateAtUpperBound_reportsNearMissOnExhaustion
     , testCase
-        "truncateAtUpperBound reports the previous-slot near-miss on overshoot"
+        "truncateAtUpperBound reports the next-slot near-miss on overshoot"
         unit_truncateAtUpperBound_reportsNearMissOnOvershoot
     ]
