@@ -1162,6 +1162,7 @@ unit_dropUntilLowerBound_reportsNearMissOnExhaustion =
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
           s @?= SlotNo 0
           h @?= bogusQueryHash
+          getEntrySlot sharedSlotChunkInfo near @?= SlotNo 0
           assertBool "near-miss must be a slot-0 entry" $
             headerHash near `elem` [ebbHash, mainHash]
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
@@ -1196,6 +1197,7 @@ unit_truncateAtUpperBound_reportsNearMissOnExhaustion =
         Left (OnDemand.StreamBoundNotFound (s, h) (Just near)) -> do
           s @?= SlotNo 0
           h @?= bogusQueryHash
+          getEntrySlot sharedSlotChunkInfo near @?= SlotNo 0
           assertBool "near-miss must be a slot-0 entry" $
             headerHash near `elem` [ebbHash, mainHash]
         other -> fail $ "expected StreamBoundNotFound with near-miss, got " ++ show other
