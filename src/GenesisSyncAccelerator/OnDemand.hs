@@ -604,6 +604,8 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
   numHeaderBytes :: Num a => a
   numHeaderBytes = fromIntegral (Secondary.unHeaderSize headerSize)
 
+  readBytes = hGetExactlyAt hasFS eHnd
+
   go :: forall b'. BlockComponent blk b' -> m b'
   go = \case
     GetHash -> return headerHash
@@ -611,15 +613,12 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
     GetIsEBB -> return $ isBlockOrEBB blockOrEBB
     GetBlockSize -> return $ SizeInBytes blockSize
     GetHeaderSize -> return numHeaderBytes
-    GetRawBlock -> hGetExactlyAt hasFS eHnd (fromIntegral blockSize) blockAbsOffset
-    GetRawHeader ->
-      hGetExactlyAt hasFS eHnd numHeaderBytes headerAbsOffset
+    GetRawBlock -> readBytes (fromIntegral blockSize) blockAbsOffset
+    GetRawHeader -> readBytes numHeaderBytes headerAbsOffset
     GetNestedCtxt -> do
       bytes <-
         Short.toShort . LBS.toStrict
-          <$> hGetExactlyAt
-            hasFS
-            eHnd
+          <$> readBytes
             (fromIntegral (getPrefixLen (reconstructPrefixLen (Proxy @(Header blk)))))
             blockAbsOffset
       return $ reconstructNestedCtxt (Proxy @(Header blk)) bytes (SizeInBytes blockSize)
