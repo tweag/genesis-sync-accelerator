@@ -591,11 +591,11 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
   slotNo :: SlotNo
   slotNo = slotNoOfBlockOrEBB chunkInfo blockOrEBB
 
-  blockAbs :: AbsOffset
-  blockAbs = AbsOffset $ Secondary.unBlockOffset blockOffset
+  blockAbsOffset :: AbsOffset
+  blockAbsOffset = AbsOffset $ Secondary.unBlockOffset blockOffset
 
-  headerAbs :: AbsOffset
-  headerAbs =
+  headerAbsOffset :: AbsOffset
+  headerAbsOffset =
     AbsOffset $
       Secondary.unBlockOffset blockOffset
         + fromIntegral (Secondary.unHeaderOffset headerOffset)
@@ -607,9 +607,9 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
     GetIsEBB -> return $ isBlockOrEBB blockOrEBB
     GetBlockSize -> return $ SizeInBytes blockSize
     GetHeaderSize -> return $ fromIntegral $ Secondary.unHeaderSize headerSize
-    GetRawBlock -> hGetExactlyAt hasFS eHnd (fromIntegral blockSize) blockAbs
+    GetRawBlock -> hGetExactlyAt hasFS eHnd (fromIntegral blockSize) blockAbsOffset
     GetRawHeader ->
-      hGetExactlyAt hasFS eHnd (fromIntegral (Secondary.unHeaderSize headerSize)) headerAbs
+      hGetExactlyAt hasFS eHnd (fromIntegral (Secondary.unHeaderSize headerSize)) headerAbsOffset
     GetNestedCtxt -> do
       bytes <-
         Short.toShort . LBS.toStrict
@@ -617,7 +617,7 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
             hasFS
             eHnd
             (fromIntegral (getPrefixLen (reconstructPrefixLen (Proxy @(Header blk)))))
-            blockAbs
+            blockAbsOffset
       return $ reconstructNestedCtxt (Proxy @(Header blk)) bytes (SizeInBytes blockSize)
     GetPure a -> return a
     GetApply f bc -> go f <*> go bc
