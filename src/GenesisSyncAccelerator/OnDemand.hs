@@ -49,7 +49,6 @@ import Data.Proxy (Proxy (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Typeable (Typeable)
-import Data.Word (Word64)
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
@@ -606,6 +605,8 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
 
   readBytes = hGetExactlyAt hasFS eHnd
 
+  unsupported componentName = error $ "GSA.extractBlockComponentNoCRC: " ++ componentName ++ " not supported"
+
   go :: forall b'. BlockComponent blk b' -> m b'
   go = \case
     GetHash -> return headerHash
@@ -624,9 +625,9 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
       return $ reconstructNestedCtxt (Proxy @(Header blk)) bytes (SizeInBytes blockSize)
     GetPure a -> return a
     GetApply f bc -> go f <*> go bc
-    GetBlock -> error "GSA.extractBlockComponentNoCRC: GetBlock not supported"
-    GetHeader -> error "GSA.extractBlockComponentNoCRC: GetHeader not supported"
-    GetVerifiedBlock -> error "GSA.extractBlockComponentNoCRC: GetVerifiedBlock not supported"
+    GetBlock -> unsupported "GetBlock"
+    GetHeader -> unsupported "GetHeader"
+    GetVerifiedBlock -> unsupported "GetVerifiedBlock"
 
 -- | Creates a "Raw Chunk Iterator" that serves blocks from a specific list of chunks.
 --
