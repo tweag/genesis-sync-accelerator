@@ -49,6 +49,7 @@ import Data.Proxy (Proxy (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Typeable (Typeable)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
@@ -600,16 +601,19 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
       Secondary.unBlockOffset blockOffset
         + fromIntegral (Secondary.unHeaderOffset headerOffset)
 
+  numHeaderBytes :: Num a => a
+  numHeaderBytes = fromIntegral (Secondary.unHeaderSize headerSize)
+
   go :: forall b'. BlockComponent blk b' -> m b'
   go = \case
     GetHash -> return headerHash
     GetSlot -> return slotNo
     GetIsEBB -> return $ isBlockOrEBB blockOrEBB
     GetBlockSize -> return $ SizeInBytes blockSize
-    GetHeaderSize -> return $ fromIntegral $ Secondary.unHeaderSize headerSize
+    GetHeaderSize -> return numHeaderBytes
     GetRawBlock -> hGetExactlyAt hasFS eHnd (fromIntegral blockSize) blockAbsOffset
     GetRawHeader ->
-      hGetExactlyAt hasFS eHnd (fromIntegral (Secondary.unHeaderSize headerSize)) headerAbsOffset
+      hGetExactlyAt hasFS eHnd numHeaderBytes headerAbsOffset
     GetNestedCtxt -> do
       bytes <-
         Short.toShort . LBS.toStrict
