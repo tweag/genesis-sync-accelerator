@@ -591,14 +591,21 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
   slotNo :: SlotNo
   slotNo = slotNoOfBlockOrEBB chunkInfo blockOrEBB
 
-  blockAbs :: AbsOffset
-  blockAbs = AbsOffset $ Secondary.unBlockOffset blockOffset
+  blockAbsOffset :: AbsOffset
+  blockAbsOffset = AbsOffset $ Secondary.unBlockOffset blockOffset
 
-  headerAbs :: AbsOffset
-  headerAbs =
+  headerAbsOffset :: AbsOffset
+  headerAbsOffset =
     AbsOffset $
       Secondary.unBlockOffset blockOffset
         + fromIntegral (Secondary.unHeaderOffset headerOffset)
+
+  numHeaderBytes :: Num a => a
+  numHeaderBytes = fromIntegral (Secondary.unHeaderSize headerSize)
+
+  readBytes = hGetExactlyAt hasFS eHnd
+
+  unsupported componentName = error $ "GSA.extractBlockComponentNoCRC: " ++ componentName ++ " not supported"
 
   go :: forall b'. BlockComponent blk b' -> m b'
   go = \case
@@ -606,24 +613,21 @@ extractBlockComponentNoCRC hasFS chunkInfo eHnd (WithBlockSize blockSize entry) 
     GetSlot -> return slotNo
     GetIsEBB -> return $ isBlockOrEBB blockOrEBB
     GetBlockSize -> return $ SizeInBytes blockSize
-    GetHeaderSize -> return $ fromIntegral $ Secondary.unHeaderSize headerSize
-    GetRawBlock -> hGetExactlyAt hasFS eHnd (fromIntegral blockSize) blockAbs
-    GetRawHeader ->
-      hGetExactlyAt hasFS eHnd (fromIntegral (Secondary.unHeaderSize headerSize)) headerAbs
+    GetHeaderSize -> return numHeaderBytes
+    GetRawBlock -> readBytes (fromIntegral blockSize) blockAbsOffset
+    GetRawHeader -> readBytes numHeaderBytes headerAbsOffset
     GetNestedCtxt -> do
       bytes <-
         Short.toShort . LBS.toStrict
-          <$> hGetExactlyAt
-            hasFS
-            eHnd
+          <$> readBytes
             (fromIntegral (getPrefixLen (reconstructPrefixLen (Proxy @(Header blk)))))
-            blockAbs
+            blockAbsOffset
       return $ reconstructNestedCtxt (Proxy @(Header blk)) bytes (SizeInBytes blockSize)
     GetPure a -> return a
     GetApply f bc -> go f <*> go bc
-    GetBlock -> error "GSA.extractBlockComponentNoCRC: GetBlock not supported"
-    GetHeader -> error "GSA.extractBlockComponentNoCRC: GetHeader not supported"
-    GetVerifiedBlock -> error "GSA.extractBlockComponentNoCRC: GetVerifiedBlock not supported"
+    GetBlock -> unsupported "GetBlock"
+    GetHeader -> unsupported "GetHeader"
+    GetVerifiedBlock -> unsupported "GetVerifiedBlock"
 
 -- | Creates a "Raw Chunk Iterator" that serves blocks from a specific list of chunks.
 --
